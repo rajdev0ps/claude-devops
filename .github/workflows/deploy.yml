@@ -21,12 +21,12 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::533267262133:role/github-actions-deploy
-          aws-region: eu-north-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
 
       - name: Sync site to S3
         run: |
-          aws s3 sync . s3://pravinmishradmi-site-production \
+          aws s3 sync . s3://${{ vars.S3_BUCKET_NAME }} \
             --delete \
             --exclude ".git/*" \
             --exclude ".github/*" \
@@ -36,8 +36,8 @@ jobs:
             --exclude "*.md" \
             --exclude "CLAUDE.md"
 
-      - name: Invalidate CloudFront cache
+      - name: Invalidate CloudFront cache on demand
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id E3V6O6MRE2E21P \
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
             --paths "/*"

@@ -5,7 +5,7 @@ allowed-tools: Bash, Read
 disable-model-invocation: true
 ---
 
-Run `cd terraform && terraform apply -auto-approve -no-color` and verify the results.
+Run `cd terraform && terraform apply -auto-approve` and verify the results.
 
 After apply completes:
 - [ ] Show the key outputs (CloudFront URL, S3 bucket name, distribution ID)

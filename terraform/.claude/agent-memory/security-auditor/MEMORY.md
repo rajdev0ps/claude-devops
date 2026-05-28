@@ -1,0 +1,1 @@
+- [Project Infra Patterns](project_infra_patterns.md) — Recurring security findings and confirmed-secure baselines for the S3+CloudFront+OIDC stack as of 2026-05-27

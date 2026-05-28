@@ -5,7 +5,7 @@ allowed-tools: Bash, Read, Grep
 disable-model-invocation: true
 ---
 
-Run `cd terraform && terraform plan -no-color` and analyze the output.
+Run `cd terraform && terraform plan` and analyze the output.
 
 Summarize:
 - [ ] How many resources will be added, changed, or destroyed

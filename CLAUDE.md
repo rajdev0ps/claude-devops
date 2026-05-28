@@ -9,11 +9,12 @@ Static HTML/CSS portfolio website deployed to AWS using S3 + CloudFront, provisi
 ## Architecture
 
 ### Application (Static Site)
-- **index.html** — Single-page portfolio (About, Services, Courses, Books, Community, Contact)
-- **style.css** — All styling (~1145 lines), mobile-first responsive (breakpoints: 900px, 768px, 600px)
+- **index.html** — Agentic AI Platform landing page (Navbar, Hero, Feature cards, Stats)
+- **style.css** — All styling (~435 lines), mobile-first responsive (breakpoints: 1200px, 768px)
 - **privacy.html / terms.html** — Standalone pages with inline styles
-- **images/** — Static assets (logo, profile, course thumbnails, hero background)
+- **images/** — Static assets directory (currently empty; index.html references image.png at root)
 - Pure HTML5 + CSS3, no JavaScript, no build step
+
 
 ### Infrastructure (`terraform/`)
 - AWS S3 bucket for static site hosting (private, OAC-based access)
@@ -28,6 +29,8 @@ Static HTML/CSS portfolio website deployed to AWS using S3 + CloudFront, provisi
 - Uses OIDC for AWS authentication (no long-lived keys)
 
 ## MCP Servers (`.mcp.json`)
+
+> Config file: `.mcp.json` at project root. Enabled servers are listed in `.claude/settings.local.json` under `enabledMcpjsonServers`.
 
 Two MCP servers are configured for Claude Code:
 - **aws** (`awslabs.aws-api-mcp-server`) — Direct AWS API access for querying and managing resources

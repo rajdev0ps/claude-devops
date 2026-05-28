@@ -1,0 +1,1 @@
+- [Partial backend config pattern](feedback_backend-partial-config.md) — backend.tf is always empty; real values in gitignored backend.hcl to avoid leaking AWS account ID
