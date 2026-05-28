@@ -1,375 +1,419 @@
-# Agentic AI Platform - Static Website on AWS
+# Agentic AI Platform — DevOps Infrastructure
 
-A professional **static HTML/CSS portfolio website** for an Agentic AI Platform, deployed to AWS S3 + CloudFront with Infrastructure as Code (Terraform) and automated CI/CD via GitHub Actions.
-
----
-
-## 🎯 Project Overview
-
-This is a full-stack DevOps project demonstrating:
-- **Static Site Hosting** — Pure HTML5 + CSS3 (no JavaScript, no build step)
-- **Infrastructure as Code** — Terraform manages S3, CloudFront, and OAC
-- **Secure Access** — CloudFront Origin Access Control (OAC) for private S3 bucket
-- **Automated Deployment** — GitHub Actions syncs content to S3 and invalidates CloudFront cache
-- **Keyless CI/CD** — GitHub OIDC provider for AWS authentication (no long-lived keys)
+Static HTML/CSS website deployed to AWS S3 + CloudFront via Terraform IaC and
+multi-stage GitHub Actions pipelines. Automated with Claude Code AI agents,
+custom skills, and safety hooks.
 
 ---
 
-## 📋 What's Included
+## Architecture
 
-```
-├── index.html              # Main landing page
-├── style.css               # Responsive styling (mobile-first)
-├── privacy.html            # Privacy policy page
-├── terms.html              # Terms of service page
-├── terraform/              # Infrastructure as Code
-│   ├── main.tf             # S3, CloudFront, OAC resources
-│   ├── variables.tf        # Input variables
-│   ├── outputs.tf          # Output values
-│   ├── providers.tf        # AWS provider config
-│   ├── backend.tf          # Remote state (S3 + DynamoDB)
-│   └── terraform.tfvars    # Environment values
-├── .github/workflows/      # GitHub Actions CI/CD
-└── CLAUDE.md              # Development guidelines
-```
+```mermaid
+graph TB
+    subgraph Branches["Branch Strategy"]
+        MAIN[main] -->|merge| DEV_BR[release-dev]
+        DEV_BR -->|/promote| STG_BR[release-stg]
+    end
 
----
+    subgraph Pipelines["GitHub Actions"]
+        DEV_BR -->|push| WF_DEV["deploy-dev.yml\nvalidate → plan → deploy → verify → tag"]
+        STG_BR -->|push| WF_STG["deploy-stg.yml\nvalidate → plan → approve → deploy → verify → tag"]
+    end
 
-## 🏗️ Architecture
+    subgraph AWS["AWS (us-east-1)"]
+        subgraph DEV["DEV Environment"]
+            S3_DEV["S3 Bucket\npetclinic-poc-dev-site"]
+            CF_DEV["CloudFront DEV\n(OAC → S3)"]
+        end
+        subgraph STG["STG Environment"]
+            S3_STG["S3 Bucket\npetclinic-poc-stg-site"]
+            CF_STG["CloudFront STG\n(OAC → S3)"]
+        end
+        subgraph STATE["Terraform State"]
+            STATE_S3["S3 State Bucket"]
+            DDB["DynamoDB Locks"]
+        end
+    end
 
-### Cloud Resources
-- **S3 Bucket** — Private static site storage (petclinic-poc-devtest-site)
-- **CloudFront Distribution** — CDN with custom error handling (404/403 → /index.html)
-- **Origin Access Control (OAC)** — Secure S3 access (not legacy OAI)
-- **Bucket Policy** — Restricts access to CloudFront only
-
-### Deployment
-```
-Git Push to main
-    ↓
-GitHub Actions Workflow
-    ↓
-AWS OIDC Authentication (keyless)
-    ↓
-Sync to S3 + Invalidate CloudFront Cache
-    ↓
-Live on CloudFront CDN
+    WF_DEV -->|"OIDC — no keys"| S3_DEV & CF_DEV
+    WF_STG -->|"OIDC — no keys"| S3_STG & CF_STG
+    S3_DEV -->|sigv4 OAC| CF_DEV
+    S3_STG -->|sigv4 OAC| CF_STG
+    CF_DEV & CF_STG -->|HTTPS| USERS[End Users]
 ```
 
 ---
 
-## 🚀 Quick Start
+## Environments
+
+| Environment | Branch | AWS Account | State Key | Auto-deploy |
+|---|---|---|---|---|
+| devtest | main (legacy) | 025760030746 | petclinic-poc/devtest/ | No |
+| dev | release-dev | 025760030746 | petclinic-poc/dev/ | Yes |
+| stg | release-stg | 025760030746 | petclinic-poc/stg/ | No — requires approval |
+
+> Both environments share the same AWS account for this POC.
+> Split accounts when promoting to production.
+
+---
+
+## Repository Structure
+
+```
+├── index.html / style.css / privacy.html / terms.html   # Site content
+├── images/                        # Static assets
+├── terraform/                     # All infrastructure (IaC)
+│   ├── main.tf                    # S3, CloudFront, OAC
+│   ├── iam.tf                     # GitHub OIDC role (scoped per env + branch)
+│   ├── locals.tf                  # common_tags (Project, Environment, ManagedBy, ...)
+│   ├── variables.tf               # Input variables with validation blocks
+│   ├── outputs.tf                 # CloudFront URL, S3 bucket, role ARN
+│   ├── providers.tf               # AWS provider, version constraints
+│   ├── backend.tf                 # Remote state (partial config — values in backend.hcl)
+│   ├── backend-infrastructure.tf  # State S3 bucket + DynamoDB lock table
+│   └── example.tfvars.example     # Template — copy to terraform.tfvars
+├── environments/
+│   ├── dev/
+│   │   ├── ci.tfvars              # DEV CI variables (committed, no secrets)
+│   │   ├── backend.hcl.example    # DEV backend template (committed)
+│   │   └── backend.hcl            # DEV backend secrets (gitignored)
+│   └── stg/
+│       ├── ci.tfvars              # STG CI variables (committed, no secrets)
+│       ├── backend.hcl.example    # STG backend template (committed)
+│       └── backend.hcl            # STG backend secrets (gitignored)
+├── .github/workflows/
+│   ├── deploy-dev.yml             # DEV pipeline (release-dev → validate/plan/deploy/verify/tag)
+│   ├── deploy-stg.yml             # STG pipeline (release-stg → same + manual approval)
+│   └── deploy-legacy.yml          # Original single-step workflow (kept for reference)
+└── .claude/                       # Claude Code AI automation
+    ├── agents/                    # 7 specialist agents
+    ├── skills/                    # 14 slash-command skills
+    └── hooks/                     # Safety hooks (UserPromptSubmit, PreToolUse, PostToolUse)
+```
+
+---
+
+## For the Code Team
+
+### Make a site change
+
+1. Edit `index.html`, `style.css`, or other pages on the `main` branch
+2. Merge to `release-dev` to trigger the DEV deploy pipeline
+3. Verify on the DEV CloudFront URL: `cd terraform && terraform output cloudfront_domain_name`
+4. Use `/promote dev` in Claude Code (or merge manually) to promote to STG after verification
+
+### Preview locally
+
+```bash
+# Open index.html directly — no build step needed
+start index.html        # Windows
+open index.html         # macOS
+xdg-open index.html     # Linux
+```
+
+### Files deployed to S3
+
+All files in the repo root **except**:
+`.git/`, `.github/`, `.claude/`, `terraform/`, `environments/`,
+`*.md`, `*.txt`, `.mcp.json`, `.tool-versions`
+
+---
+
+## For the Infrastructure Team
 
 ### Prerequisites
-- AWS Account with credentials configured
-- Terraform 1.5+
-- AWS CLI v2
 
-### Deploy
-
-1. **Configure AWS Credentials:**
-   ```bash
-   aws configure
-   # Enter: Access Key, Secret Key, Region (us-east-1), Output Format (json)
-   ```
-
-2. **Initialize Terraform:**
-   ```bash
-   cd terraform
-   terraform init
-   ```
-
-3. **Review & Apply Infrastructure:**
-   ```bash
-   terraform plan
-   terraform apply
-   ```
-
-4. **Upload Site Files:**
-   ```bash
-   cd ..
-   aws s3 sync . s3://petclinic-poc-devtest-site/ \
-     --exclude "terraform/*" \
-     --exclude ".git/*" \
-     --exclude ".github/*" \
-     --exclude "*.md" \
-     --exclude ".claude/*"
-   ```
-
-5. **Test:**
-   ```bash
-   # Get CloudFront domain from terraform outputs
-   terraform output cloudfront_domain_name
-   ```
-
----
-
-## 📊 Current Deployment
-
-| Resource | Value |
-|----------|-------|
-| **CloudFront Domain** | `d3ijldrl5oi8h4.cloudfront.net` |
-| **Distribution ID** | `E155Q8VSBBEKPZ` |
-| **S3 Bucket** | `petclinic-poc-devtest-site` |
-| **Region** | `us-east-1` |
-| **Environment** | `devtest` |
-| **Pricing** | Free tier (1 TB/month data transfer included) |
-
----
-
-## 📝 Making Changes
-
-### Update Website Content
-1. Edit `index.html`, `style.css`, or other pages
-2. Push to `main` branch
-3. GitHub Actions automatically syncs to S3 and refreshes CloudFront
-
-### Update Infrastructure
-1. Edit `terraform/main.tf`
-2. Run: `terraform plan` (review changes)
-3. Run: `terraform apply` (deploy)
-
-### Update Variables
-Edit `terraform/terraform.tfvars` and re-apply:
-```hcl
-region       = "us-east-1"
-project_name = "petclinic-poc"
-environment  = "devtest"
-domain_name  = ""  # Add custom domain here
+```bash
+terraform --version   # requires >= 1.5 (pinned: 1.14.4 via .tool-versions / .terraform-version)
+aws --version         # AWS CLI v2
+jq --version          # required for Claude Code hooks
 ```
 
----
+### First-time setup (per environment)
 
-## 🔐 Security
+```bash
+# 1. Copy and fill in the backend config (gitignored — never commit)
+cp environments/dev/backend.hcl.example environments/dev/backend.hcl
+# Edit: set bucket = "terraform-state-{account-id}-us-east-1"
 
-- ✅ **Private S3 Bucket** — No public access allowed
-- ✅ **CloudFront OAC** — Modern Origin Access Control (not legacy OAI)
-- ✅ **HTTPS Only** — Viewer protocol redirects HTTP → HTTPS
-- ✅ **Keyless CI/CD** — GitHub OIDC (no AWS access keys stored)
-- ✅ **IAM Role** — Least-privilege permissions for GitHub Actions
+# 2. Copy and fill in the var file (gitignored — never commit)
+cp terraform/example.tfvars.example environments/dev/terraform.tfvars
+# Edit: set all values for the dev environment
 
----
+# 3. Initialise with the dev backend
+cd terraform
+terraform init -backend-config=../environments/dev/backend.hcl
 
-## 📋 Terraform Outputs
+# 4. Plan and apply
+terraform plan  -var-file=../environments/dev/terraform.tfvars
+terraform apply -var-file=../environments/dev/terraform.tfvars
+```
 
-After `terraform apply`, view outputs:
+### Per-environment commands
+
+```bash
+# DEV
+terraform init   -backend-config=../environments/dev/backend.hcl
+terraform plan   -var-file=../environments/dev/terraform.tfvars
+terraform apply  -var-file=../environments/dev/terraform.tfvars
+
+# STG
+terraform init   -backend-config=../environments/stg/backend.hcl
+terraform plan   -var-file=../environments/stg/terraform.tfvars
+terraform apply  -var-file=../environments/stg/terraform.tfvars
+```
+
+### Get live resource values
+
 ```bash
 cd terraform
-terraform output
-
-# Output:
-# cloudfront_distribution_id = "E155Q8VSBBEKPZ"
-# cloudfront_domain_name     = "d3ijldrl5oi8h4.cloudfront.net"
-# s3_bucket_name             = "petclinic-poc-devtest-site"
-# s3_bucket_arn              = "arn:aws:s3:::petclinic-poc-devtest-site"
+terraform output                          # all outputs
+terraform output cloudfront_domain_name  # CloudFront URL
+terraform output s3_bucket_name          # S3 bucket name
+terraform output github_actions_role_arn # IAM role ARN (set as GitHub secret)
 ```
+
+### Add a new environment
+
+```bash
+# In Claude Code:
+/add-env prod
+# Follow the printed checklist for manual steps
+```
+
+### Security model
+
+| Control | Implementation |
+|---|---|
+| S3 access | Private bucket — CloudFront OAC only (sigv4 signing) |
+| HTTPS | Viewer protocol policy: redirect HTTP → HTTPS |
+| CI/CD auth | GitHub OIDC — no stored AWS access keys ever |
+| IAM scope | Role trust locked to specific repo + branch |
+| State security | S3 versioning + DynamoDB locking + AES256 encryption |
+| Infra changes | Terraform only — never modify AWS resources manually |
 
 ---
 
-## 🛠️ Maintenance
+## For the AI / Automation Team
 
-### Monitor CloudFront
-```bash
-aws cloudfront get-distribution --id E155Q8VSBBEKPZ --query 'Distribution.Status'
+### Claude Code skills
+
+```
+# Infrastructure
+/scaffold-terraform [region] [name]  — generate all Terraform files (tf-writer agent)
+/scaffold-cicd [account-id] [env]    — generate GitHub Actions workflow + OIDC role
+/tf-plan                             — terraform plan + risk analysis
+/tf-apply                            — terraform apply + verify outputs
+/infra-status                        — health dashboard of all resources
+/infra-audit                         — parallel security + cost + drift audit
+
+# Deployment
+/deploy                              — sync S3 + invalidate CloudFront
+/validate-env [dev|stg]              — pre-flight checks before deploying
+/rollback [dev|stg]                  — restore previous S3 version + invalidate CF
+
+# Release management
+/promote [dev]                       — merge release-dev → release-stg (with confirmation)
+/tag-release [dev|stg] [sha]         — create annotated release-{env}-SHA-{sha} git tag
+
+# Environment management
+/add-env [name]                      — scaffold new environment directory + backend template
+/setup-gh-actions [create|validate]  — create or validate CI workflow
 ```
 
-### Invalidate Cache (force refresh)
-```bash
-aws cloudfront create-invalidation --distribution-id E155Q8VSBBEKPZ --paths "/*"
-```
+### Claude Code agents
 
-### Check S3 Bucket Size
-```bash
-aws s3 ls s3://petclinic-poc-devtest-site/ --recursive --human-readable
-```
+| Agent | Purpose | Model |
+|---|---|---|
+| `tf-writer` | Generate Terraform code, run fmt + validate after writing | sonnet |
+| `security-auditor` | Audit IaC for security issues (CRITICAL/HIGH/MEDIUM/LOW) | sonnet |
+| `cost-optimizer` | Review infra for cost savings, flag absent `price_class` | haiku |
+| `drift-detector` | Detect drift via `terraform plan -detailed-exitcode` | haiku |
+| `release-manager` | Git tagging and branch promotion | sonnet |
+| `env-provisioner` | Bootstrap new environment directories and checklists | sonnet |
+| `pipeline-validator` | Audit GitHub Actions workflows for DevSecOps compliance | haiku |
 
-### View Terraform State
-```bash
-cd terraform
-terraform state list
-terraform state show aws_s3_bucket.site_bucket
-```
+### Safety hooks
+
+| Hook | Trigger | Action |
+|---|---|---|
+| `user-prompt-guard.sh` | Every user message | Blocks: "nuke", "wipe", "delete all", "destroy everything" |
+| `pre-tool-guard.sh` | Every Bash tool call | Blocks: `terraform destroy`, `terraform apply -auto-approve`, `aws s3 rm` |
+| `post-tool-logger.sh` | Every Bash tool call | Logs every `terraform apply` to `.claude/deploy.log` |
+
+Hooks use relative paths and `git rev-parse --show-toplevel` — work on any
+machine without modification. Require `jq` (see New Machine Setup).
 
 ---
 
-## 💰 Cost Estimates
+## For On-call / SRE
 
-**Monthly Cost (Free Tier Included):**
-- S3 Storage: < $0.10 (minimal HTML/CSS files)
-- CloudFront: **Free** (1 TB/month included, then ~$0.085/GB)
-- Data Transfer: **Free** (within free tier limits)
+### Roll back a bad deploy
 
-**Total: ~$0 - $5/month** (for typical traffic)
+```bash
+# Via Claude Code:
+/rollback dev     # or: /rollback stg
 
----
+# Manually:
+BUCKET=$(cd terraform && terraform output -raw s3_bucket_name)
+DIST=$(cd terraform && terraform output -raw cloudfront_distribution_id)
 
-## 🐛 Troubleshooting
+# List recent S3 versions
+aws s3api list-object-versions --bucket "$BUCKET" --prefix index.html --max-items 5
 
-### Access Denied from CloudFront
-- Verify S3 bucket policy allows CloudFront service
-- Check OAC is configured in CloudFront origin
-- Invalidate CloudFront cache: `aws cloudfront create-invalidation ...`
+# Restore a specific version
+aws s3api copy-object \
+  --bucket "$BUCKET" \
+  --copy-source "$BUCKET/index.html?versionId=<VERSION_ID>" \
+  --key index.html
 
-### Site Not Updating
-- Confirm files uploaded to S3: `aws s3 ls s3://petclinic-poc-devtest-site/`
+# Invalidate CloudFront cache
+aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
+```
+
+### Force CloudFront cache invalidation
+
+```bash
+DIST=$(cd terraform && terraform output -raw cloudfront_distribution_id)
+aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
+```
+
+### Check CloudFront distribution status
+
+```bash
+DIST=$(cd terraform && terraform output -raw cloudfront_distribution_id)
+aws cloudfront get-distribution --id "$DIST" --query "Distribution.Status" --output text
+```
+
+### Check S3 bucket contents
+
+```bash
+BUCKET=$(cd terraform && terraform output -raw s3_bucket_name)
+aws s3 ls "s3://$BUCKET/" --recursive --human-readable
+```
+
+### View deploy audit log
+
+```bash
+cat .claude/deploy.log
+```
+
+### Troubleshooting
+
+**Access Denied from CloudFront:**
+- Verify S3 bucket policy allows CloudFront OAC (`terraform show`)
+- Check OAC is attached to the CloudFront origin
+- Invalidate cache and wait 30-60 seconds
+
+**Site not updating after deploy:**
+- Confirm files are in S3: `aws s3 ls s3://$BUCKET/`
 - Invalidate CloudFront cache
-- Wait 30-60 seconds for cache propagation
+- Check GitHub Actions workflow completed all 5 jobs
 
-### Terraform State Issues
-- Backend is commented out (use local state for dev)
-- Uncomment `backend.tf` and run `terraform init -migrate-state` for remote state
-
----
-
-## 💡 Running on a New Machine — Hook Setup Tips
-
-The Claude Code safety hooks (`.claude/hooks/`) rely on **`jq`** for JSON parsing and **absolute paths** baked into `settings.json` and one hook script. Both must be updated whenever the project is cloned to a new machine or a different path.
+**Terraform state issues:**
+- Verify `environments/{env}/backend.hcl` exists with correct bucket name
+- Run `terraform init -backend-config=../environments/{env}/backend.hcl -reconfigure`
+- Use `/validate-env dev` for a full pre-flight check
 
 ---
 
-### Files that need updating
+## GitHub Setup (First Time)
 
-| File | What to change |
-|------|---------------|
-| `.claude/settings.json` | All 3 hook command paths (lines with `bash 'S:/devops/...'`) |
-| `.claude/hooks/post-tool-logger.sh` | Deploy log path (`>> 'S:/devops/...'`) |
-| `.claude/hooks/pre-tool-guard.sh` | Debug log path (`>> /c/Users/raj/...`) |
+Configure these before the first pipeline run.
+
+### Secrets — Actions → Secrets → Actions
+
+| Secret | Value | How to get |
+|---|---|---|
+| `AWS_ROLE_ARN_DEV` | IAM role ARN for DEV | `cd terraform && terraform output github_actions_role_arn` |
+| `AWS_ROLE_ARN_STG` | IAM role ARN for STG | same after applying STG environment |
+
+### Variables — Actions → Variables → Actions
+
+| Variable | Value |
+|---|---|
+| `TF_STATE_BUCKET` | `terraform-state-{aws-account-id}-us-east-1` |
+
+### Environments — Settings → Environments
+
+| Environment | Protection rule |
+|---|---|
+| `dev` | None — auto-deploy on push to release-dev |
+| `stg` | Required reviewer — add yourself before first STG deploy |
 
 ---
 
-### Windows (Git Bash)
+## New Machine Setup
 
-**Step 1 — Install `jq`** (required; hooks use it to parse JSON input):
+Hooks use relative paths and require `jq` for JSON parsing.
+No path configuration needed after cloning.
+
+### Install jq
 
 ```bash
-# Option A: download binary — no admin rights needed
+# Windows (Git Bash) — no admin required
 mkdir -p ~/bin
 curl -sL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe" \
   -o ~/bin/jq.exe
 
-# Option B: Chocolatey — requires admin shell
+# Windows — Chocolatey (admin shell)
 choco install jq -y
+
+# macOS
+brew install jq
+
+# Ubuntu / Debian
+sudo apt-get install jq
+
+# RHEL / Fedora
+sudo dnf install jq
 ```
 
-**Step 2 — Update hook command paths in `.claude/settings.json`:**
-
-Find the three occurrences of `bash 'S:/devops/Ultimate-Agentic-DevOps-with-Claude-Code/.claude/hooks/...'`
-and replace `S:/devops/Ultimate-Agentic-DevOps-with-Claude-Code` with your actual project path using
-forward slashes (Git Bash style), e.g. `C:/Users/yourname/projects/my-repo`:
-
-```json
-"command": "bash 'C:/Users/yourname/projects/my-repo/.claude/hooks/pre-tool-guard.sh'"
-"command": "bash 'C:/Users/yourname/projects/my-repo/.claude/hooks/user-prompt-guard.sh'"
-"command": "bash 'C:/Users/yourname/projects/my-repo/.claude/hooks/post-tool-logger.sh'"
-```
-
-**Step 3 — Update the deploy log path in `.claude/hooks/post-tool-logger.sh`:**
-
-```bash
-# change this line:
->> 'S:/devops/Ultimate-Agentic-DevOps-with-Claude-Code/.claude/deploy.log'
-
-# to:
->> 'C:/Users/yourname/projects/my-repo/.claude/deploy.log'
-```
-
-**Step 4 — Update the debug log path in `.claude/hooks/pre-tool-guard.sh`:**
-
-```bash
-# change this line:
->> /c/Users/raj/hook-debug.log
-
-# to (using your Windows username):
->> /c/Users/YOUR_USERNAME/hook-debug.log
-```
-
----
-
-### Linux / macOS
-
-**Step 1 — Install `jq`:**
-
-```bash
-sudo apt-get install jq    # Debian / Ubuntu
-sudo yum install jq        # RHEL / CentOS
-sudo dnf install jq        # Fedora
-brew install jq            # macOS (Homebrew)
-```
-
-**Step 2 — Update hook command paths in `.claude/settings.json`:**
-
-Replace the Windows-style paths with the Linux absolute path to your project:
-
-```json
-"command": "bash '/home/yourname/projects/my-repo/.claude/hooks/pre-tool-guard.sh'"
-"command": "bash '/home/yourname/projects/my-repo/.claude/hooks/user-prompt-guard.sh'"
-"command": "bash '/home/yourname/projects/my-repo/.claude/hooks/post-tool-logger.sh'"
-```
-
-**Step 3 — Update the deploy log path in `.claude/hooks/post-tool-logger.sh`:**
-
-```bash
-# change this line:
->> 'S:/devops/Ultimate-Agentic-DevOps-with-Claude-Code/.claude/deploy.log'
-
-# to:
->> '/home/yourname/projects/my-repo/.claude/deploy.log'
-```
-
-**Step 4 — Update the debug log path in `.claude/hooks/pre-tool-guard.sh`:**
-
-```bash
-# change this line:
->> /c/Users/raj/hook-debug.log
-
-# to (any writable path):
->> /tmp/hook-debug.log
-```
-
-**Step 5 — Ensure hook scripts are executable** (Linux/macOS only):
+### Make hooks executable (Linux/macOS only)
 
 ```bash
 chmod +x .claude/hooks/*.sh
 ```
 
----
-
-### Verify hooks are working
-
-After making the above changes, run these quick tests from within Claude Code:
+### Verify hooks work
 
 ```bash
-# 1. PreToolUse hook — should be BLOCKED:
-terraform destroy
+# Should be BLOCKED (exit 2):
+echo '{"tool_input":{"command":"terraform destroy"}}' | bash .claude/hooks/pre-tool-guard.sh
 
-# 2. PreToolUse hook — should be ALLOWED:
-terraform validate
+# Should PASS silently (exit 0):
+echo '{"tool_input":{"command":"terraform validate"}}' | bash .claude/hooks/pre-tool-guard.sh
 
-# 3. PostToolUse hook — simulate and check log:
+# Should write an entry to deploy.log:
 echo '{"tool_input":{"command":"terraform apply"}}' | bash .claude/hooks/post-tool-logger.sh
-cat .claude/deploy.log
+cat .claude/deploy.log | tail -1
 
-# 4. UserPromptSubmit hook — simulate:
+# Should output a block decision:
 echo '{"prompt":"nuke everything"}' | bash .claude/hooks/user-prompt-guard.sh
-# Expected output: {"decision": "block", "reason": "..."}
 ```
 
 ---
 
-## 📚 Resources
+## Cost
+
+| Resource | Monthly cost |
+|---|---|
+| S3 storage | < $0.10 (small HTML/CSS files) |
+| CloudFront (PriceClass_100) | Free tier: 1 TB/month, then ~$0.085/GB |
+| DynamoDB state lock | Free (PAY_PER_REQUEST, negligible traffic) |
+| **Total** | **~$0–$5/month** |
+
+WAF intentionally excluded — adds ~$5+/month base cost, not needed for POC.
+
+---
+
+## Resources
 
 - [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest)
-- [CloudFront Documentation](https://docs.aws.amazon.com/cloudfront/)
-- [S3 Origin Access Control](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
-- [GitHub OIDC in AWS](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- [CloudFront Origin Access Control](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
+- [GitHub OIDC with AWS](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- [Claude Code documentation](https://claude.ai/code)
 
 ---
 
-## 📄 License
-
-This project is part of the Ultimate Agentic DevOps initiative.
-
----
-
-**Last Updated:** May 27, 2026  
-**Project:** petclinic-poc | Environment: devtest
+**Project:** petclinic-poc | **Terraform:** 1.14.4 | **AWS Provider:** ~> 5.0 | **Updated:** 2026-05-28
