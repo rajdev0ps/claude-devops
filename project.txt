@@ -1,0 +1,389 @@
+================================================================================
+PROJECT DETAILS — Ultimate Agentic DevOps with Claude Code
+================================================================================
+Generated: 2026-05-28
+Repository: rajdev0ps/Ultimate-Agentic-DevOps-with-Claude-Code
+Branch: main
+AWS Account: 025760030746
+AWS Region: us-east-1
+Environment: devtest
+Project Name (Terraform): petclinic-poc
+
+================================================================================
+1. PROJECT OVERVIEW
+================================================================================
+
+A fully automated DevOps project that deploys a static HTML/CSS website to AWS
+using a modern, agentic infrastructure-as-code stack. The project demonstrates:
+
+  - Static site hosting via AWS S3 + CloudFront CDN
+  - Infrastructure-as-Code using Terraform
+  - Keyless CI/CD via GitHub Actions + AWS OIDC
+  - Claude Code AI agent automation for DevOps tasks
+  - Safety hooks, custom agents, and reusable skill commands
+
+The site content is an "Agentic AI Platform" landing page.
+
+================================================================================
+2. TECH STACK
+================================================================================
+
+  Frontend:
+    - Pure HTML5 + CSS3 (no JavaScript, no build step)
+    - Files: index.html, style.css, privacy.html, terms.html
+    - Mobile-first responsive design (breakpoints: 1200px, 768px)
+
+  Infrastructure:
+    - AWS S3           — Static site hosting (private bucket, OAC access)
+    - AWS CloudFront   — CDN distribution, HTTPS, cache invalidation
+    - AWS IAM          — OIDC role for GitHub Actions (no long-lived keys)
+    - AWS DynamoDB     — Terraform state lock table
+    - Terraform >= 1.5 — Infrastructure provisioning
+    - AWS Provider     — hashicorp/aws ~> 5.0
+
+  CI/CD:
+    - GitHub Actions   — Triggered on push to main branch
+    - AWS OIDC         — Keyless AWS auth (no access keys stored)
+    - actions/checkout@v4
+    - aws-actions/configure-aws-credentials@v4
+
+  AI / Automation:
+    - Claude Code (claude-sonnet-4-6) — Agentic DevOps assistant
+    - MCP Server: awslabs.aws-api-mcp-server — Direct AWS API access
+    - MCP Server: hashicorp/terraform-mcp-server — Terraform via Docker
+
+================================================================================
+3. PROJECT STRUCTURE
+================================================================================
+
+  /
+  ├── index.html                        — Main landing page (Hero, Features, Stats)
+  ├── style.css                         — All site styles (~435 lines)
+  ├── privacy.html                      — Privacy policy (inline styles)
+  ├── terms.html                        — Terms of service (inline styles)
+  ├── images/                           — Static assets directory
+  ├── CLAUDE.md                         — Claude Code project instructions
+  ├── README.md                         — Project documentation
+  ├── .gitignore                        — Git ignore rules
+  ├── .mcp.json                         — MCP server configuration
+  │
+  ├── terraform/                        — All Terraform infrastructure code
+  │   ├── providers.tf                  — AWS provider + Terraform version lock
+  │   ├── main.tf                       — S3 bucket + CloudFront distribution
+  │   ├── variables.tf                  — Input variables (region, project, env)
+  │   ├── outputs.tf                    — CloudFront ID, domain, S3 bucket name/ARN
+  │   ├── iam.tf                        — GitHub OIDC + IAM role + policy
+  │   ├── backend.tf                    — Remote S3 backend (partial config)
+  │   ├── backend.hcl                   — Backend secrets (gitignored)
+  │   ├── backend-infrastructure.tf     — State bucket + DynamoDB lock table
+  │   └── terraform.tfvars              — Variable values (gitignored)
+  │
+  ├── .github/
+  │   └── workflows/
+  │       └── deploy.yml                — GitHub Actions deploy pipeline
+  │
+  └── .claude/
+      ├── settings.json                 — Permissions, hooks, status line
+      ├── settings.local.json           — AWS credentials, MCP enablement (gitignored)
+      ├── deploy.log                    — Audit log of all terraform apply runs
+      ├── agents/
+      │   ├── tf-writer.md              — Terraform code generation agent
+      │   ├── security-auditor.md       — Security audit agent
+      │   ├── cost-optimizer.md         — Cost review agent
+      │   └── drift-detector.md         — Infrastructure drift detection agent
+      ├── hooks/
+      │   ├── user-prompt-guard.sh      — Blocks destructive user prompts
+      │   ├── pre-tool-guard.sh         — Blocks dangerous Bash commands
+      │   └── post-tool-logger.sh       — Logs all terraform apply executions
+      ├── skills/
+      │   ├── deploy/                   — /deploy skill
+      │   ├── scaffold-terraform/       — /scaffold-terraform skill
+      │   ├── tf-plan/                  — /tf-plan skill
+      │   ├── tf-apply/                 — /tf-apply skill
+      │   ├── infra-status/             — /infra-status skill
+      │   ├── infra-audit/              — /infra-audit skill
+      │   └── setup-gh-actions/         — /setup-gh-actions skill
+      └── agent-memory/
+          ├── tf-writer/                — tf-writer agent persistent memory
+          └── security-auditor/         — security-auditor persistent memory
+
+================================================================================
+4. AWS INFRASTRUCTURE
+================================================================================
+
+  SITE BUCKET
+    Name:      petclinic-poc-devtest-site
+    Access:    Private (all public access blocked)
+    Encryption: AES256 (SSE-S3) with bucket key enabled
+    Access:    CloudFront OAC only (sigv4 signing)
+    Policy:    Allows s3:GetObject only from CloudFront distribution ARN
+
+  CLOUDFRONT DISTRIBUTION
+    ID:              E155Q8VSBBEKPZ
+    Origin:          S3 bucket via OAC (not legacy OAI)
+    Default Root:    index.html
+    HTTPS:           Redirect HTTP → HTTPS (viewer_protocol_policy)
+    IPv6:            Enabled
+    Cache Policy:    Managed-CachingOptimized
+    Error Handling:  404 + 403 → /index.html (200 response, 300s TTL)
+    Geo Restriction: None (global)
+    Certificate:     CloudFront default (*.cloudfront.net)
+
+  IAM / OIDC
+    OIDC Provider:   https://token.actions.githubusercontent.com (existing)
+    IAM Role:        github-actions-deploy
+    Trust:           Scoped to repo rajdev0ps/Ultimate-Agentic-DevOps-with-Claude-Code
+                     on ref refs/heads/main only
+    Permissions:
+      - s3:GetObject, PutObject, DeleteObject, ListBucket on site bucket
+      - cloudfront:CreateInvalidation on site distribution
+
+  TERRAFORM STATE BACKEND
+    S3 Bucket:       terraform-state-025760030746-us-east-1
+    State Key:       petclinic-poc/devtest/terraform.tfstate
+    Encryption:      true
+    DynamoDB Lock:   terraform-locks (PAY_PER_REQUEST, SSE enabled, PITR enabled)
+    Logs Bucket:     terraform-logs-025760030746-us-east-1
+
+================================================================================
+5. CI/CD PIPELINE — GitHub Actions
+================================================================================
+
+  Trigger:   push to main branch
+  Runner:    ubuntu-latest
+  Auth:      OIDC (role-to-assume: secrets.AWS_ROLE_ARN)
+  Region:    us-east-1
+
+  Steps:
+    1. Checkout code
+    2. Configure AWS credentials via OIDC (no stored access keys)
+    3. aws s3 sync to vars.S3_BUCKET_NAME
+       Excludes: .git/, .github/, .claude/, terraform/, .mcp.json, *.md
+       Flag: --delete (removes files deleted from repo)
+    4. CloudFront invalidation: aws cloudfront create-invalidation --paths "/*"
+
+  GitHub Secrets/Vars required:
+    - secrets.AWS_ROLE_ARN         — IAM role ARN for OIDC
+    - vars.S3_BUCKET_NAME          — S3 bucket name
+    - vars.CLOUDFRONT_DISTRIBUTION_ID — CloudFront distribution ID
+
+================================================================================
+6. TERRAFORM DETAILS
+================================================================================
+
+  Required Version:   >= 1.5
+  Provider:           hashicorp/aws ~> 5.0 (currently 5.100.0)
+  Backend:            S3 (partial config — secrets in backend.hcl, gitignored)
+
+  Variables:
+    region          (string)  — AWS region, default: us-east-1
+    project_name    (string)  — Project identifier, set to: petclinic-poc
+    environment     (string)  — Deployment env, default: production, set to: devtest
+    domain_name     (string)  — Custom domain (optional), default: ""
+    existing_cloudfront_distribution_id (string) — For import, set: E155Q8VSBBEKPZ
+
+  Outputs:
+    cloudfront_distribution_id    — E155Q8VSBBEKPZ
+    cloudfront_domain_name        — CloudFront *.cloudfront.net URL
+    s3_bucket_name                — petclinic-poc-devtest-site
+    s3_bucket_arn                 — Full ARN
+    github_actions_role_arn       — IAM role ARN (sensitive)
+    terraform_state_bucket        — State S3 bucket name (sensitive)
+    terraform_dynamodb_table      — terraform-locks
+
+  Resource list:
+    aws_s3_bucket.site_bucket
+    aws_s3_bucket_public_access_block.site_bucket_pab
+    aws_s3_bucket_server_side_encryption_configuration.site_bucket_sse
+    aws_s3_bucket_policy.site_bucket_policy
+    aws_cloudfront_origin_access_control.site_oac
+    aws_cloudfront_distribution.site_distribution
+    aws_iam_role.github_actions_deploy
+    aws_iam_role_policy.github_actions_deploy
+    aws_s3_bucket.terraform_state
+    aws_s3_bucket_versioning.terraform_state
+    aws_s3_bucket_server_side_encryption_configuration.terraform_state
+    aws_s3_bucket_public_access_block.terraform_state
+    aws_s3_bucket_logging.terraform_state
+    aws_s3_bucket.terraform_logs
+    aws_s3_bucket_public_access_block.terraform_logs
+    aws_s3_bucket_server_side_encryption_configuration.terraform_logs
+    aws_dynamodb_table.terraform_locks
+
+================================================================================
+7. CLAUDE CODE CONFIGURATION
+================================================================================
+
+  Model: claude-sonnet-4-6 (with alwaysThinking enabled)
+
+  MCP SERVERS (.mcp.json):
+    aws:        uvx awslabs.aws-api-mcp-server@latest
+                — Direct AWS API access (queries, resource management)
+    terraform:  docker run hashicorp/terraform-mcp-server
+                — Terraform operations, workspace mounted at /workspace
+
+  PERMISSIONS (settings.json):
+    Allowed (auto-approved):
+      - cd terraform && terraform init/plan/output/show/fmt/validate
+      - aws s3 ls
+      - aws cloudfront get-distribution
+      - aws sts get-caller-identity
+
+    Denied (always blocked):
+      - rm -rf *
+      - aws iam *
+
+  HOOKS (settings.json):
+    UserPromptSubmit → user-prompt-guard.sh
+      Blocks if prompt contains: "delete all", "destroy everything",
+      "remove all resources", "wipe", "nuke", "drop all"
+
+    PreToolUse (Bash) → pre-tool-guard.sh
+      Blocks commands: terraform destroy, terraform apply -auto-approve,
+      aws s3 rm, aws s3 rb
+      Debug log: C:/Users/raj/hook-debug.log
+
+    PostToolUse (Bash) → post-tool-logger.sh
+      Logs every terraform apply to .claude/deploy.log
+      Fields: timestamp, OS user, hostname, IAM ARN
+
+================================================================================
+8. CUSTOM AGENTS (.claude/agents/)
+================================================================================
+
+  tf-writer (model: inherit)
+    - Tools: Read, Write, Edit, Glob, Grep
+    - Memory: project
+    - MCP: terraform
+    - Purpose: Generate production-quality Terraform for AWS
+    - Standards: OAC not OAI, least-privilege IAM, no hardcoded IDs
+
+  security-auditor (model: sonnet)
+    - Tools: Read, Grep, Glob (read-only)
+    - Memory: project
+    - Purpose: Audit all terraform/*.tf for security issues
+    - Reports: CRITICAL / HIGH / MEDIUM / LOW severity with exact fix
+
+  cost-optimizer (model: haiku)
+    - Tools: Read, Grep, Glob (read-only)
+    - Memory: project
+    - Purpose: Identify cost savings in Terraform config
+    - Focus: CloudFront price class, S3 classes, caching TTL
+
+  drift-detector (model: haiku)
+    - Tools: Bash, Read
+    - Memory: project
+    - Purpose: Run terraform plan -detailed-exitcode to detect drift
+    - Reports: Added/Changed/Destroyed resources vs state
+
+================================================================================
+9. SKILL COMMANDS (.claude/skills/)
+================================================================================
+
+  /scaffold-terraform [region] [name]
+    — Generate complete Terraform config for S3 + CloudFront
+    — Uses tf-writer agent, disable-model-invocation: true
+
+  /deploy
+    — Runs terraform output, aws s3 sync, cloudfront create-invalidation
+    — disable-model-invocation: true (runs steps directly)
+
+  /tf-plan
+    — Runs terraform plan + risk analysis
+
+  /tf-apply
+    — Runs terraform apply + verifies output
+
+  /infra-status
+    — Health dashboard of all deployed AWS resources
+
+  /infra-audit
+    — Parallel: launches security-auditor + cost-optimizer + drift-detector
+    — context: fork (runs all three simultaneously)
+    — Returns unified Security / Cost / Drift report
+
+  /setup-gh-actions [create|validate]
+    — Creates or validates GitHub Actions CI workflow
+
+  /tf-destroy
+    — Safe destroy with confirmation (bypasses the hook block)
+
+  Built-in skills:
+    /commit   — Auto-generate commit message
+    /compact  — Compress conversation context
+
+================================================================================
+10. SAFETY LAYERS
+================================================================================
+
+  Layer 1: UserPromptSubmit hook
+    Keyword detection on raw user input — blocks before any tool call
+
+  Layer 2: PreToolUse hook (Bash)
+    Command-level blocking — prevents terraform destroy, s3 rm at execution time
+
+  Layer 3: settings.json permissions
+    deny: rm -rf, aws iam — always blocked, no override
+
+  Layer 4: PostToolUse hook (Bash)
+    Immutable audit trail in .claude/deploy.log for all terraform apply runs
+
+================================================================================
+11. DEPLOY LOG (audit trail)
+================================================================================
+
+  Location: .claude/deploy.log
+
+  Past runs:
+    2026-05-28T09:38:43Z  terraform apply executed (user unavailable at time)
+    2026-05-28T09:38:43Z  terraform apply executed (user unavailable at time)
+    2026-05-28T09:43:44Z  terraform apply executed | user=raj | host=LAPTOP-OJES81RS | iam=arn:aws:iam::025760030746:user/petclinic
+    2026-05-28T09:43:47Z  terraform apply executed | user=raj | host=LAPTOP-OJES81RS | iam=arn:aws:iam::025760030746:user/petclinic
+
+================================================================================
+12. CONVENTIONS & RULES
+================================================================================
+
+  - All infrastructure changes go through Terraform — never via AWS Console
+  - All CI/CD changes go through GitHub Actions — no manual S3 uploads in prod
+  - GitHub OIDC auth only — no long-lived AWS access keys ever stored
+  - Terraform state backend uses S3 + DynamoDB locking (no local state in prod)
+  - backend.hcl and terraform.tfvars are gitignored (contain account-sensitive data)
+  - AWS credentials are in .claude/settings.local.json (gitignored, not .mcp.json)
+  - All Terraform resources tagged with Project and Environment
+  - Use data sources (aws_caller_identity, aws_region) — never hardcode ARNs
+  - S3 buckets: always private, public access blocked, AES256 encryption
+  - CloudFront: OAC over OAI, HTTP → HTTPS redirect, TLS 1.2 minimum
+  - IAM: least privilege, no wildcards, OIDC conditions scoped to repo+branch
+
+================================================================================
+13. QUICK REFERENCE COMMANDS
+================================================================================
+
+  # Initialize Terraform
+  cd terraform && terraform init -backend-config=backend.hcl
+
+  # Plan infrastructure changes
+  cd terraform && terraform plan
+
+  # Apply infrastructure changes
+  cd terraform && terraform apply
+
+  # Deploy site content manually
+  aws s3 sync . s3://petclinic-poc-devtest-site \
+    --exclude "terraform/*" --exclude ".git/*" --exclude ".github/*" \
+    --exclude "*.md" --exclude ".claude/*"
+
+  # Invalidate CloudFront cache manually
+  aws cloudfront create-invalidation \
+    --distribution-id E155Q8VSBBEKPZ --paths "/*"
+
+  # Check AWS identity
+  aws sts get-caller-identity
+
+  # View deploy audit log
+  cat .claude/deploy.log
+
+================================================================================
+END OF PROJECT DETAILS
+================================================================================

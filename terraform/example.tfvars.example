@@ -1,0 +1,22 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit real values.
+#
+# Usage:
+#   cp example.tfvars.example terraform.tfvars
+#   # then edit terraform.tfvars with your actual values
+#   terraform init -backend-config=../environments/dev/backend.hcl
+#   terraform plan -var-file=../environments/dev/terraform.tfvars
+
+region       = "us-east-1"
+project_name = "your-project-name"    # lowercase, hyphens only, 3-32 chars
+environment  = "dev"                   # dev | stg | prod | devtest | production
+
+domain_name                         = ""               # leave empty for default CloudFront domain
+existing_cloudfront_distribution_id = ""               # only needed when importing an existing distribution
+cloudfront_price_class              = "PriceClass_100" # cheapest; covers US, Canada, Europe
+
+github_repo   = "your-org/your-infra-repo" # must match the repo triggering GitHub Actions
+github_branch = "release-dev"              # branch scoped in OIDC trust (e.g. release-dev, release-stg, main)
+
+owner_team  = "platform-team" # your team name — goes into resource tags
+cost_center = "CC-001"        # billing cost center code — goes into resource tags

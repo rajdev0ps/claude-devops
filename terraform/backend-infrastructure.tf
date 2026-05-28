@@ -6,11 +6,7 @@
 resource "aws_s3_bucket" "terraform_state" {
   bucket = "terraform-state-${data.aws_caller_identity.current.account_id}-${var.region}"
 
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-    Purpose     = "Terraform State Storage"
-  }
+  tags = merge(local.common_tags, { Purpose = "Terraform State Storage" })
 }
 
 # Enable versioning on the state bucket
@@ -56,11 +52,7 @@ resource "aws_s3_bucket_logging" "terraform_state" {
 resource "aws_s3_bucket" "terraform_logs" {
   bucket = "terraform-logs-${data.aws_caller_identity.current.account_id}-${var.region}"
 
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-    Purpose     = "Terraform State Logs"
-  }
+  tags = merge(local.common_tags, { Purpose = "Terraform State Logs" })
 }
 
 # Block public access to logs bucket
@@ -86,9 +78,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_logs" {
 
 # DynamoDB table for Terraform state locking
 resource "aws_dynamodb_table" "terraform_locks" {
-  name           = "terraform-locks"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "LockID"
+  name         = "terraform-locks"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
 
   attribute {
     name = "LockID"
@@ -103,11 +95,7 @@ resource "aws_dynamodb_table" "terraform_locks" {
     enabled = true
   }
 
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-    Purpose     = "Terraform State Locking"
-  }
+  tags = merge(local.common_tags, { Purpose = "Terraform State Locking" })
 }
 
 # Data source to get current AWS account ID

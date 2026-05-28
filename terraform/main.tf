@@ -2,10 +2,7 @@
 resource "aws_s3_bucket" "site_bucket" {
   bucket = "${var.project_name}-${var.environment}-site"
 
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-  }
+  tags = local.common_tags
 }
 
 # Block all public access to S3 bucket
@@ -77,6 +74,7 @@ resource "aws_cloudfront_distribution" "site_distribution" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
+  price_class         = var.cloudfront_price_class
 
   lifecycle {
     ignore_changes = [web_acl_id]
@@ -117,10 +115,7 @@ resource "aws_cloudfront_distribution" "site_distribution" {
     cloudfront_default_certificate = true
   }
 
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-  }
+  tags = local.common_tags
 }
 
 # Data source for CloudFront Managed Cache Policy (CachingOptimized)

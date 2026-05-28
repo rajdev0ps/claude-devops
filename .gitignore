@@ -3,7 +3,6 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/*.tfstate.lock.info
-terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/terraform.tfvars.json
 terraform/override.tf
@@ -16,6 +15,8 @@ terraform/override.tf.json
 .env.local
 .env.*.local
 terraform/backend.hcl
+environments/*/backend.hcl
+environments/*/terraform.tfvars
 
 # IDE
 .vscode/

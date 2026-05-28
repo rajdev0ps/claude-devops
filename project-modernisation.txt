@@ -1,0 +1,1010 @@
+================================================================================
+PROJECT MODERNISATION PLAN — Ultimate Agentic DevOps with Claude Code
+================================================================================
+Created: 2026-05-28
+Author: AWS Lead Infrastructure Architect Review (Claude Code)
+Repository: rajdev0ps/Ultimate-Agentic-DevOps-with-Claude-Code
+Scope: Full architectural review across 22 dimensions
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+ 1.  Repository Structure — Production Standards
+ 2.  Skills — Gaps & Fixes
+ 3.  Hooks — Issues & Fixes
+ 4.  Agents — Gaps & Issues
+ 5.  DEV + STG Environments — Full Plan
+ 6.  Scope for Further Resource Additions
+ 7.  Terraform Best Practices — Gaps
+ 8.  Hardcoded Values to Variabilize
+ 9.  Common Tags + Per-Env Variables + 2 AWS Accounts
+10.  CLAUDE.md / settings.json / settings.local.json Review
+11.  Hooks & Agents — Functional Correctness
+12.  AWS Lead Infrastructure Architect Perspective
+13.  DevSecOps Principles in GitHub Pipeline
+14.  Code Formatting & Comments — Production Grade?
+15.  README.md — Architecture Diagram
+16.  Team-Oriented README Sections
+17.  UI Code in Separate Repository
+18.  release-dev / release-stg Branches + Two AWS Accounts
+19.  Commit Tagging Strategy
+20.  Multi-Stage Pipeline + DevSecOps
+21.  Separate Code & Infrastructure Repositories
+22.  Missing AI-Side Capabilities
+    Priority Summary Table
+
+================================================================================
+1. REPOSITORY STRUCTURE — PRODUCTION STANDARDS
+================================================================================
+
+Current State: Single-env flat layout. Not production-ready for multi-env.
+
+GAPS:
+  - terraform/ is flat — no module separation, no per-env workspace isolation
+  - backend-infrastructure.tf (state bucket) lives alongside app infra — should
+    be bootstrapped separately as its own module
+  - No modules/ directory for reusable Terraform components
+  - No environments/ directory for env-specific var files
+  - .terraform.lock.hcl is gitignored — SHOULD be committed (reproducible installs)
+  - No .terraform-version or .tool-versions for toolchain version pinning
+  - No Makefile / justfile as a developer task runner
+  - No tests/ directory (Terratest, checkov, tfsec)
+  - No docs/ directory for runbooks and architecture diagrams
+
+RECOMMENDED STRUCTURE:
+  /
+  ├── environments/
+  │   ├── dev/
+  │   │   ├── backend.hcl          ← gitignored, per-env backend secrets
+  │   │   └── terraform.tfvars     ← gitignored, per-env variable values
+  │   └── stg/
+  │       ├── backend.hcl
+  │       └── terraform.tfvars
+  ├── terraform/
+  │   ├── modules/
+  │   │   ├── static-site/         ← reusable S3 + CloudFront module
+  │   │   └── state-backend/       ← bootstrap module (run once per account)
+  │   ├── main.tf
+  │   ├── variables.tf
+  │   ├── outputs.tf
+  │   ├── providers.tf
+  │   ├── locals.tf                ← NEW: common locals + merged tags
+  │   ├── backend.tf
+  │   └── .terraform.lock.hcl     ← COMMITTED (remove from .gitignore)
+  ├── docs/
+  │   └── architecture.md          ← Mermaid diagram of full system
+  ├── tests/
+  │   └── checkov/                 ← IaC security policy tests
+  ├── .tool-versions               ← terraform 1.5.x, awscli 2.x
+  └── example.tfvars.example       ← template since real tfvars is gitignored
+
+================================================================================
+2. SKILLS — GAPS & FIXES
+================================================================================
+
+ISSUES FOUND:
+
+  Skill                 | Problem
+  ----------------------|--------------------------------------------------------
+  tf-apply              | Uses -auto-approve — dangerous, no human confirmation gate
+  tf-destroy            | Listed in CLAUDE.md but SKILL.md does NOT EXIST
+  scaffold-cicd         | Listed in CLAUDE.md but SKILL.md does NOT EXIST
+  project-scope         | Referenced in CLAUDE.md as auto-loaded but NOT FOUND
+  setup-gh-actions      | Validates only single workflow, not multi-env
+  (missing) /rollback   | No skill to revert to prior S3 object version
+  (missing) /promote    | No skill to push release-dev artifacts → release-stg
+  (missing) /tag-release| No skill for commit tagging strategy
+  (missing) /validate-env | No preflight check before deploy
+  (missing) /cost-report| No skill pulling real AWS Cost Explorer data
+  (missing) /add-env    | No skill to scaffold a new environment directory
+
+NEW SKILLS TO CREATE:
+  /rollback [env]
+    — Restore prior S3 object versions via S3 versioning, re-invalidate CloudFront
+
+  /promote [dev|stg]
+    — Sync artifacts from release-dev to release-stg after approval gate
+
+  /tag-release [env] [sha]
+    — Create git tag in format release-{env}-SHA-{sha} and push to origin
+
+  /validate-env [dev|stg]
+    — Pre-flight checks: credentials valid, bucket exists, distribution active,
+      Terraform state accessible
+
+  /cost-report [env]
+    — Pull real Cost Explorer data filtered by project tags, output formatted report
+
+  /add-env [name]
+    — Scaffold environments/{name}/ with backend.hcl template + terraform.tfvars template
+
+FIX FOR tf-apply:
+  Remove -auto-approve from the automated step. Add a confirmation prompt or
+  require the plan artifact from the validate stage to be passed explicitly:
+    terraform apply tfplan.binary   ← applies exactly what was reviewed
+
+================================================================================
+3. HOOKS — ISSUES & FIXES
+================================================================================
+
+CRITICAL ISSUES:
+
+  Hook / File                        | Problem
+  -----------------------------------|------------------------------------------
+  settings.json (all 3 hook paths)   | Hardcoded to S:/devops/... — breaks on
+                                     | any machine other than the original dev box
+  post-tool-logger.sh                | Deploy log path hardcoded to S:/devops/...
+  pre-tool-guard.sh                  | Debug log hardcoded to /c/Users/raj/hook-debug.log
+                                     | (personal username leaked into version control)
+  All 3 hooks                        | No graceful fallback if jq not installed —
+                                     | will fail silently
+  All hooks                          | No PostToolUse hook for S3 sync operations
+                                     | (only terraform apply is logged)
+  All hooks                          | No notification hook on deployment completion
+  user-prompt-guard.sh               | Silent pass on empty prompt is correct
+                                     | behavior but should log the invocation
+
+FIX STRATEGY:
+  1. Replace all absolute paths in settings.json hook commands with:
+       bash "$(git rev-parse --show-toplevel)/.claude/hooks/hook-name.sh"
+     This makes the project portable to any machine or path.
+
+  2. Add jq guard at top of every hook script:
+       command -v jq >/dev/null 2>&1 || exit 0
+
+  3. Replace hardcoded deploy log path in post-tool-logger.sh:
+       LOG_DIR="$(git rev-parse --show-toplevel)/.claude"
+       echo "[...]" >> "$LOG_DIR/deploy.log"
+
+  4. Replace hardcoded debug log path in pre-tool-guard.sh:
+       DEBUG_LOG="${TMPDIR:-/tmp}/claude-hook-debug.log"
+
+  5. Add PostToolUse hook for S3 sync operations:
+       Trigger on: aws s3 sync
+       Log: timestamp, environment, bucket, file count, deployer identity
+
+  6. Add set -euo pipefail to all hook scripts to catch silent failures.
+
+  7. (Optional) Add a notification hook that fires on deployment success,
+     posting to a webhook (Slack, Teams, PagerDuty).
+
+================================================================================
+4. AGENTS — GAPS & ISSUES
+================================================================================
+
+CURRENT AGENT ISSUES:
+
+  Agent             | Issue
+  ------------------|----------------------------------------------------------
+  tf-writer         | Missing Bash tool — cannot run terraform fmt after writing
+  security-auditor  | Read-only is correct but findings not persisted in structured
+                    | JSON format for downstream tooling
+  cost-optimizer    | Misses price_class omission in main.tf — CloudFront defaults
+                    | to PriceClass_All (most expensive); this is an active bug
+  drift-detector    | terraform plan output can expose sensitive state values
+  All agents        | No release-manager agent for branch promotion and tagging
+  All agents        | No env-provisioner agent for bootstrapping new environments
+  All agents        | No pipeline-validator agent for GitHub Actions YAML linting
+  All agents        | No notify-agent for Slack/email on deployments or alerts
+
+FIXES FOR EXISTING AGENTS:
+  tf-writer:
+    Add Bash to tools list so it can run terraform fmt post-generation.
+    Add terraform validate as a post-generation verification step.
+
+  cost-optimizer:
+    Add explicit check for price_class setting in CloudFront distribution.
+    Flag PriceClass_All as HIGH impact finding with estimated cost difference.
+
+  drift-detector:
+    Use terraform plan -out=tfplan -no-color to avoid sensitive output in logs.
+    Add -compact-warnings flag to reduce noise.
+
+NEW AGENTS TO CREATE:
+  release-manager
+    Tools: Bash, Read, Write
+    Model: sonnet
+    Purpose: Handle git tagging, branch promotion, changelog generation.
+    Triggers: After successful deploy verify step.
+
+  env-provisioner
+    Tools: Bash, Read, Write, Edit
+    Model: sonnet
+    MCP: terraform, aws
+    Purpose: Bootstrap a new environment — creates state bucket, DynamoDB lock
+    table, OIDC provider, IAM role, and environments/ directory structure.
+
+  pipeline-validator
+    Tools: Read, Grep, Glob, Bash
+    Model: haiku
+    Purpose: Validate GitHub Actions YAML syntax, verify all referenced secrets
+    and variables exist, check action version pinning.
+
+================================================================================
+5. DEV + STG ENVIRONMENTS — FULL PLAN
+================================================================================
+
+YES, fully achievable. Recommended approach: DIRECTORY-PER-ENVIRONMENT
+(not Terraform workspaces).
+
+WHY NOT TERRAFORM WORKSPACES:
+  Workspaces share the same Terraform codebase and AWS provider credentials.
+  For two different AWS accounts, directory isolation is cleaner, provides
+  blast-radius separation, and allows independent state backends per account.
+
+ARCHITECTURE OVERVIEW:
+  Two AWS Accounts:
+    Account A (DEV):  <dev-account-id>
+    Account B (STG):  <stg-account-id>
+
+  Two GitHub branches:
+    release-dev  →  deploys to Account A (DEV)
+    release-stg  →  deploys to Account B (STG)
+
+  Two OIDC trust policies:
+    Account A IAM Role: {project}-dev-github-deploy
+      trusted: repo:{owner}/{repo}:ref:refs/heads/release-dev
+    Account B IAM Role: {project}-stg-github-deploy
+      trusted: repo:{owner}/{repo}:ref:refs/heads/release-stg
+
+  Two Terraform state backends:
+    s3://terraform-state-{devAccountId}-us-east-1
+      key = {project}/dev/terraform.tfstate
+    s3://terraform-state-{stgAccountId}-us-east-1
+      key = {project}/stg/terraform.tfstate
+
+  Two GitHub workflow files:
+    .github/workflows/deploy-dev.yml   (trigger: push to release-dev)
+    .github/workflows/deploy-stg.yml   (trigger: push to release-stg)
+
+TERRAFORM VARIABLE FILES:
+  environments/dev/terraform.tfvars:
+    region        = "us-east-1"
+    project_name  = "agenticai"
+    environment   = "dev"
+    aws_account   = "<dev-account-id>"
+    github_branch = "release-dev"
+    cost_center   = "CC-001-DEV"
+    owner_team    = "platform-team"
+
+  environments/stg/terraform.tfvars:
+    region        = "us-east-1"
+    project_name  = "agenticai"
+    environment   = "stg"
+    aws_account   = "<stg-account-id>"
+    github_branch = "release-stg"
+    cost_center   = "CC-001-STG"
+    owner_team    = "platform-team"
+
+TERRAFORM INIT PER ENVIRONMENT:
+  # DEV
+  cd terraform
+  terraform init -backend-config=../environments/dev/backend.hcl
+  terraform plan -var-file=../environments/dev/terraform.tfvars
+
+  # STG
+  cd terraform
+  terraform init -backend-config=../environments/stg/backend.hcl
+  terraform plan -var-file=../environments/stg/terraform.tfvars
+
+================================================================================
+6. SCOPE FOR FURTHER RESOURCE ADDITIONS
+================================================================================
+
+The existing Terraform structure can accommodate all of these additions
+without a major refactor — they slot into terraform/ as new .tf files.
+
+  Resource                                  | Purpose
+  ------------------------------------------|----------------------------------
+  aws_wafv2_web_acl                         | WAF protection on CloudFront:
+                                            | rate limiting, geo-block, bot rules
+  aws_cloudwatch_metric_alarm               | Alert on 4xx/5xx error rate spike
+  aws_cloudwatch_dashboard                  | Ops visibility dashboard
+  aws_sns_topic + aws_sns_subscription      | Email/Slack alert delivery
+  aws_route53_zone + aws_acm_certificate    | Custom domain + HTTPS cert
+                                            | (domain_name var already exists)
+  aws_cloudfront_response_headers_policy    | Security headers: CSP, HSTS,
+                                            | X-Frame-Options, Referrer-Policy
+  S3 lifecycle rule (noncurrent versions)   | Auto-expire old versions after 90d
+  aws_budgets_budget                        | Cost alert when spend > threshold
+  aws_cloudfront_monitoring_subscription   | CloudFront real-time metrics
+
+NOTE: The domain_name variable already exists in variables.tf but is currently
+unused. Route53 + ACM is the next logical addition when a custom domain is needed.
+
+================================================================================
+7. TERRAFORM BEST PRACTICES — GAPS
+================================================================================
+
+  Gap                                          | Severity | Fix
+  ---------------------------------------------|----------|----------------------
+  .terraform.lock.hcl is gitignored            | HIGH     | Commit it — ensures
+                                               |          | reproducible builds
+  No validation{} blocks on variables          | MEDIUM   | Add condition +
+                                               |          | error_message to all vars
+  No locals.tf for common computed values      | MEDIUM   | Extract repeated tag
+                                               |          | expressions to locals
+  backend-infrastructure.tf mixes state        | HIGH     | Move to
+  bootstrap with app infra                     |          | modules/state-backend/
+  No terraform fmt -check in CI                | HIGH     | Add as first pipeline step
+  No checkov or tfsec in pipeline              | HIGH     | Add as security gate
+  No terraform validate in CI                  | MEDIUM   | Add before plan stage
+  existing_cloudfront_distribution_id var is  | LOW      | Remove after import is
+  a one-time import workaround                 |          | complete; not idiomatic
+  No example.tfvars.example                    | MEDIUM   | Provide template since
+                                               |          | real tfvars is gitignored
+  No version pinning for tools in CI           | MEDIUM   | Pin terraform version
+                                               |          | in setup-terraform@v3
+  price_class not set in CloudFront dist       | HIGH     | Set PriceClass_100 or
+  (defaults to PriceClass_All — most expensive)|          | PriceClass_200 explicitly
+
+VARIABLE VALIDATION EXAMPLE:
+  variable "environment" {
+    type        = string
+    description = "Deployment environment"
+    validation {
+      condition     = contains(["dev", "stg", "prod"], var.environment)
+      error_message = "environment must be one of: dev, stg, prod"
+    }
+  }
+
+================================================================================
+8. HARDCODED VALUES TO VARIABILIZE
+================================================================================
+
+  Location                          | Hardcoded Value                  | Should Be
+  ----------------------------------|----------------------------------|--------------------------
+  terraform/iam.tf:53               | rajdev0ps/Ultimate-Agentic-...   | var.github_repo
+  terraform/iam.tf:53               | refs/heads/main                  | var.github_branch
+  terraform/iam.tf:60               | "github-actions-deploy"          | "${var.project_name}-
+                                    |                                  |  ${var.environment}-deploy"
+  terraform/main.tf:98-108          | error_caching_min_ttl = 300      | var.error_cache_ttl
+  terraform/backend-infrastructure  | "terraform-locks"                | "${var.project_name}-
+    .tf:88                          |                                  |  terraform-locks"
+  .github/workflows/deploy.yml:25   | aws-region: us-east-1            | env.AWS_REGION
+  .claude/hooks/post-tool-logger.sh | S:/devops/... (absolute path)    | Dynamic: git rev-parse
+  .claude/hooks/pre-tool-guard.sh   | /c/Users/raj/hook-debug.log      | $TMPDIR/claude-hook-debug.log
+  README.md (multiple lines)        | E155Q8VSBBEKPZ, d3ijldrl5oi8h4  | Reference terraform output
+                                    | .cloudfront.net, bucket name     | commands only; no live IDs
+  terraform/main.tf                 | price_class not set at all       | var.cloudfront_price_class
+                                    |                                  | default = "PriceClass_100"
+
+================================================================================
+9. COMMON TAGS + PER-ENV VARIABLES + 2 AWS ACCOUNTS
+================================================================================
+
+ADD terraform/locals.tf:
+  locals {
+    common_tags = {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Owner       = var.owner_team
+      CostCenter  = var.cost_center
+      Repository  = var.github_repo
+    }
+  }
+
+  Replace all individual tag blocks with:
+    tags = local.common_tags
+  or for resources needing extra tags:
+    tags = merge(local.common_tags, { Purpose = "StateStoarge" })
+
+ADD TO terraform/variables.tf:
+  variable "owner_team" {
+    description = "Team responsible for this environment"
+    type        = string
+  }
+  variable "cost_center" {
+    description = "Billing cost center code"
+    type        = string
+  }
+  variable "github_repo" {
+    description = "GitHub repository (owner/name) for OIDC trust"
+    type        = string
+  }
+  variable "github_branch" {
+    description = "GitHub branch scoped in OIDC trust condition"
+    type        = string
+  }
+  variable "aws_account" {
+    description = "Target AWS account ID (used for validation)"
+    type        = string
+  }
+  variable "cloudfront_price_class" {
+    description = "CloudFront price class (PriceClass_100 is cheapest)"
+    type        = string
+    default     = "PriceClass_100"
+    validation {
+      condition     = contains(["PriceClass_100","PriceClass_200","PriceClass_All"], var.cloudfront_price_class)
+      error_message = "Must be PriceClass_100, PriceClass_200, or PriceClass_All"
+    }
+  }
+
+TWO AWS ACCOUNTS — PROVIDER PATTERN:
+  Each environment's pipeline authenticates via OIDC into the correct account.
+  No alias provider needed in single-env Terraform runs.
+  The aws_account variable can be used with a data source check:
+    data "aws_caller_identity" "current" {}
+    locals {
+      account_check = var.aws_account != "" && data.aws_caller_identity.current.account_id != var.aws_account ? tobool("ERROR: wrong AWS account") : true
+    }
+  This prevents accidentally applying DEV terraform against the STG account.
+
+================================================================================
+10. CLAUDE.md / settings.json / settings.local.json REVIEW
+================================================================================
+
+CLAUDE.md ISSUES:
+  - Missing: documentation of the project-scope skill (listed but no file exists)
+  - Missing: documentation of environments/ directory structure post-refactor
+  - Missing: instructions for settings.local.json — what values must be set
+    and how to obtain them (AWS profile, region, MCP enablement)
+  - Missing: agent memory paths documented (.claude/agent-memory/)
+  - Should reference environments/dev/ and environments/stg/ after restructure
+  - Custom agents section should document the new agents when added
+
+settings.json ISSUES:
+  - alwaysThinkingEnabled: true — verify this key is current and valid
+  - ALL 3 hook command paths are hardcoded to S:/devops/... — must be made
+    portable (see Section 3 fix strategy)
+  - Missing allowed reads that are commonly needed:
+      Bash(cat .claude/deploy.log)
+      Bash(git log*)
+      Bash(git status*)
+      Bash(git tag*)
+  - deny: "aws iam *" is too broad — should allow read-only IAM introspection:
+      Allow: aws iam get-role, aws iam list-attached-role-policies
+      Keep denied: aws iam create-*, aws iam delete-*, aws iam put-*
+
+settings.local.json ISSUES:
+  - AWS_PROFILE: "default" — once multi-env exists, this needs to be
+    env-specific (dev-profile, stg-profile) or swapped per session
+  - No documentation of what belongs in this file (add to CLAUDE.md)
+  - After multi-env, active workspace context should be reflected here
+  - Consider adding AWS_ACCOUNT_ID as a local env var for hook scripts to use
+
+================================================================================
+11. HOOKS & AGENTS — FUNCTIONAL CORRECTNESS
+================================================================================
+
+HOOKS — WHAT WORKS, WHAT DOESN'T:
+
+  user-prompt-guard.sh
+    WORKS: Correctly blocks destructive prompts.
+    ISSUE: Exits 0 silently on no match — correct for Claude but means the hook
+           never logs its own invocations for audit purposes.
+
+  pre-tool-guard.sh
+    WORKS: Correctly blocks terraform destroy, s3 rm, s3 rb.
+    ISSUE: Debug log path /c/Users/raj/hook-debug.log is a personal path baked
+           into version control. Will silently fail (no error) on any other
+           machine, meaning the guard may run but produce no debug trail.
+    ISSUE: No set -euo pipefail — a jq failure produces no signal.
+
+  post-tool-logger.sh
+    WORKS: Correctly logs terraform apply with user, host, IAM ARN.
+    ISSUE: Absolute S:/devops/... path fails on any other machine.
+    MISSING: Does not log aws s3 sync operations — only terraform apply.
+
+AGENTS — WHAT WORKS, WHAT DOESN'T:
+
+  tf-writer
+    WORKS: Generates correct, well-structured Terraform.
+    MISSING: Cannot run terraform fmt — no Bash tool in its definition.
+
+  security-auditor
+    WORKS: Correctly identifies security issues.
+    ISSUE: cost-optimizer agent uses haiku model but misses price_class gap in
+           main.tf — this is a real finding that should be caught every audit.
+
+  drift-detector
+    WORKS: terraform plan -detailed-exitcode is the correct approach.
+    ISSUE: Plan output can contain sensitive state values; should use
+           -no-color -compact-warnings and pipe to a summary only.
+
+  cost-optimizer
+    WORKS: General cost review logic is sound.
+    MISSING: Does not flag absent price_class on CloudFront (defaults to
+             PriceClass_All, the most expensive option).
+
+================================================================================
+12. AWS LEAD INFRASTRUCTURE ARCHITECT PERSPECTIVE
+================================================================================
+
+  Area              | Finding                                | Recommendation
+  ------------------|----------------------------------------|------------------
+  WAF               | No WAF on CloudFront distribution      | Add aws_wafv2_web_acl
+                    |                                        | with AWSManagedRules
+  Observability     | No CloudWatch alarms, no dashboard     | Add 4xx/5xx alarms
+                    |                                        | + SNS notification
+  Security headers  | No HSTS, CSP, X-Frame-Options          | Add aws_cloudfront_
+                    | configured on responses                | response_headers_policy
+  Custom domain     | domain_name var exists but unused      | Wire up Route53 + ACM
+                    |                                        | when domain is ready
+  CF access logging | CloudFront has no access logging       | Enable to separate
+                    | (only state bucket has S3 logs)        | S3 log bucket
+  Price class       | price_class not set — defaults to      | Set PriceClass_100
+                    | PriceClass_All (most expensive)        | explicitly
+  State bootstrap   | backend-infrastructure.tf in same dir  | Separate into
+                    | as app resources                       | modules/state-backend/
+  Multi-region      | Single region, no DR strategy          | Acceptable for static
+                    |                                        | site; document decision
+  Budget alerts     | No AWS Budgets configured              | Add aws_budgets_budget
+                    |                                        | with email alert
+  S3 lifecycle      | No lifecycle rules on site bucket      | Add 90-day expiry on
+                    |                                        | noncurrent versions
+  IAM role naming   | Role named "github-actions-deploy"     | Rename to
+                    | is not environment-scoped              | {project}-{env}-deploy
+  TLS/HTTPS         | Uses CloudFront default cert           | Acceptable; upgrade to
+                    | (*.cloudfront.net)                     | ACM cert when domain set
+
+================================================================================
+13. DEVSECOPS PRINCIPLES IN GITHUB PIPELINE
+================================================================================
+
+CURRENT STATE: Single job, 4 steps — no security gates, no validation,
+no staged promotion, no approval gates.
+
+  Stage            | Current State  | Gap
+  -----------------|----------------|----------------------------------------------
+  Pre-flight       | None           | terraform fmt -check, terraform validate
+  Security scan    | None           | checkov, tfsec, gitleaks (secret scan)
+  Plan artifact    | None           | terraform plan -out=tfplan, upload artifact
+  Approval gate    | None           | GitHub Environment protection rules for STG
+  Deploy (infra)   | Not in CI yet  | terraform apply tfplan (from artifact)
+  Deploy (site)    | Single step    | Should be: validate → upload → verify
+  Post-deploy      | None           | HTTP smoke test against CloudFront URL
+  Tagging          | None           | release-{env}-SHA-{sha} git tag post-deploy
+  Notification     | None           | Slack/email on success and failure
+  Runner pinning   | ubuntu-latest  | Pin to ubuntu-22.04 for reproducibility
+  Action versions  | Partially      | All actions should pin to SHA, not floating tag
+
+DEVSECOPS CHECKLIST:
+  Shift-left security:
+    [ ] gitleaks on every push (secret scanning)
+    [ ] checkov in validate stage (IaC policy as code)
+    [ ] tfsec in validate stage (Terraform security linting)
+    [ ] HTML lint / link checker for UI quality gate
+
+  Plan-then-apply pattern:
+    [ ] terraform plan -out=tfplan.binary saved as CI artifact
+    [ ] terraform apply tfplan.binary (not a fresh plan) to prevent drift
+        between plan and apply
+
+  Approval gates:
+    [ ] DEV: auto-deploy on branch push
+    [ ] STG: require manual approval via GitHub Environment protection rule
+
+  Immutable artifacts:
+    [ ] S3 bucket versioning already enabled (good)
+    [ ] Tag every deploy with release-{env}-SHA-{sha} for rollback reference
+
+  Audit trail:
+    [ ] deploy.log already captures terraform apply (good)
+    [ ] Add S3 sync logging to the same trail
+    [ ] Pipeline logs retained as GitHub Actions artifacts (30-day default)
+
+================================================================================
+14. CODE FORMATTING & COMMENTS — PRODUCTION GRADE?
+================================================================================
+
+TERRAFORM FILES:
+  GOOD: Comments explain intent (OAC, encryption, DynamoDB locking).
+  GAP: No validation{} blocks on any variable — silent failures possible.
+  GAP: existing_cloudfront_distribution_id is a workaround variable that
+       should be removed from long-term config after import is complete.
+  GAP: backend-infrastructure.tf header comment is the best in the codebase;
+       providers.tf, variables.tf, outputs.tf have no file-level comments.
+  GAP: No terraform-docs generated module documentation.
+  GAP: No lifecycle { prevent_destroy = true } on critical resources
+       (CloudFront distribution, state DynamoDB table).
+
+SHELL HOOKS:
+  GAP: pre-tool-guard.sh lacks set -euo pipefail — silent failures possible.
+  GAP: Personal debug path leaks developer info into version control.
+  GAP: No file-level description of what each hook is responsible for.
+  GAP: user-prompt-guard.sh exits without message when no match — add a
+       debug log line for observability.
+
+SKILL FILES:
+  GAP: tf-apply SKILL.md uses -auto-approve without a confirmation step.
+  GAP: Skills do not document expected outputs or failure modes.
+  GAP: infra-audit skill does not document timeout expectations for
+       parallel agent execution.
+
+AGENT DEFINITIONS:
+  GAP: No examples section showing what good vs. bad output looks like.
+  GAP: No escalation path (what to do when security-auditor finds CRITICAL).
+  GAP: cost-optimizer agent does not explicitly list CloudFront price_class
+       in its cost review checklist.
+
+================================================================================
+15. README.md — ARCHITECTURE DIAGRAM MISSING
+================================================================================
+
+CURRENT README HAS:
+  + ASCII deployment flow (basic)
+  + Hook setup instructions for Windows and Linux/macOS
+  + Cost estimates
+  + Troubleshooting section
+  + Terraform outputs reference
+
+MISSING:
+  - No Mermaid or ASCII architecture diagram showing the full system topology
+    (S3, CloudFront, OAC, IAM/OIDC, GitHub Actions, state backend)
+  - No team-oriented sections (Code / Infrastructure / AI / Security / SRE)
+  - No branch strategy documented
+  - No environment matrix (DEV vs STG)
+  - No contributing guidelines
+  - Hardcoded live resource values that will rot:
+      E155Q8VSBBEKPZ (distribution ID)
+      d3ijldrl5oi8h4.cloudfront.net (domain)
+      petclinic-poc-devtest-site (bucket name)
+    These should be replaced with: "see terraform output" instructions only.
+
+PROPOSED ARCHITECTURE DIAGRAM (Mermaid):
+  graph LR
+    DEV[Developer] -->|git push| GH[GitHub]
+    GH -->|push to release-dev| WF_DEV[GH Actions: deploy-dev]
+    GH -->|push to release-stg| WF_STG[GH Actions: deploy-stg]
+    WF_DEV -->|OIDC| IAM_DEV[IAM Role DEV Account]
+    WF_STG -->|OIDC| IAM_STG[IAM Role STG Account]
+    IAM_DEV --> S3_DEV[S3 Site Bucket DEV]
+    IAM_STG --> S3_STG[S3 Site Bucket STG]
+    S3_DEV -->|OAC| CF_DEV[CloudFront DEV]
+    S3_STG -->|OAC| CF_STG[CloudFront STG]
+    CF_DEV -->|HTTPS| USER[End User]
+    CF_STG -->|HTTPS| USER
+    TF[Terraform] -->|state| STATE_S3[State S3 Bucket]
+    STATE_S3 --> DDB[DynamoDB Lock Table]
+
+================================================================================
+16. TEAM-ORIENTED README SECTIONS
+================================================================================
+
+PROPOSED README STRUCTURE:
+  ## Architecture Diagram         → Mermaid system diagram
+  ## For the Code Team            → Edit HTML/CSS, preview locally, deploy trigger
+  ## For the Infrastructure Team  → Terraform commands, backend setup, multi-env
+  ## For the AI/Automation Team   → Claude skills, agents, hooks, how to extend
+  ## For the Security Team        → IAM/OIDC setup, WAF, hook safety layers
+  ## For On-call / SRE            → Rollback steps, cache invalidation, alarms
+
+  ## Code Team (Frontend/UI)
+    - How to edit and preview index.html and style.css locally
+    - How a push to release-dev triggers the deploy-dev workflow
+    - How to check if changes are live (CloudFront URL, invalidation status)
+    - File exclusions: what NOT to commit (.claude/, terraform/, *.md)
+
+  ## Infrastructure Team (DevOps/Platform)
+    - Prerequisites: terraform >= 1.5, awscli v2, jq
+    - First-time bootstrap: create state backend, then switch to remote
+    - Per-environment init: terraform init -backend-config=../environments/{env}/backend.hcl
+    - How OIDC works (no stored keys, role trust scoped to branch)
+    - Adding a new environment: use /add-env skill
+
+  ## AI/Automation Team (Claude Code)
+    - How to run Claude Code in this project
+    - Available skills: full list with descriptions
+    - Available agents: what each does and when to use them
+    - How hooks protect the environment
+    - How to add a new skill or agent
+
+  ## Security Team (SecOps)
+    - IAM role trust policies and how they are scoped
+    - How to rotate or update OIDC configuration
+    - Hook safety layers explained
+    - WAF configuration (when added)
+    - Security scanning in pipeline: checkov, tfsec, gitleaks
+
+  ## On-call / SRE
+    - How to roll back a bad deploy (S3 version restore + invalidation)
+    - How to manually invalidate CloudFront cache
+    - CloudWatch alarm thresholds and SNS subscription setup
+    - How to check current deployment state (terraform show, /infra-status)
+
+================================================================================
+17. UI CODE IN SEPARATE REPOSITORY
+================================================================================
+
+YES, fully supported and recommended as the team grows.
+
+SPLIT PATTERN:
+  Repo A: agenticai-ui
+    ├── index.html
+    ├── style.css
+    ├── privacy.html
+    ├── terms.html
+    ├── images/
+    └── .github/workflows/
+        ├── deploy-dev.yml    (trigger: push to release-dev)
+        └── deploy-stg.yml    (trigger: push to release-stg)
+
+  Repo B: agenticai-infra
+    ├── terraform/
+    ├── environments/dev/
+    ├── environments/stg/
+    ├── .claude/
+    ├── .github/workflows/
+    │   ├── infra-dev.yml
+    │   └── infra-stg.yml
+    └── CLAUDE.md
+
+WHAT CHANGES IN TERRAFORM WHEN SPLIT:
+  IAM trust policy for the UI repo role:
+    Permissions: s3:PutObject, s3:GetObject, s3:DeleteObject, s3:ListBucket
+                 cloudfront:CreateInvalidation only
+    Trust:       scoped to agenticai-ui repo
+
+  IAM trust policy for the infra repo role:
+    Permissions: Full Terraform permissions (S3 state, IAM, CloudFront, DynamoDB)
+    Trust:       scoped to agenticai-infra repo
+
+  State bucket access is restricted to the infra repo only.
+  The UI repo never touches Terraform state.
+
+CROSS-REPO WORKFLOW (for coordinated releases):
+  UI repo deploy succeeds → triggers workflow_dispatch on infra repo
+  OR: both repos use matching release-{env}-SHA-{sha} tags for traceability
+
+================================================================================
+18. release-dev / release-stg BRANCHES + TWO AWS ACCOUNTS
+================================================================================
+
+WORKFLOW TRIGGER DESIGN:
+  deploy-dev.yml:
+    on:
+      push:
+        branches: [release-dev]
+    env:
+      AWS_ACCOUNT:    "<dev-account-id>"
+      ENVIRONMENT:    "dev"
+      AWS_REGION:     "us-east-1"
+      ROLE_ARN:       ${{ secrets.AWS_ROLE_ARN_DEV }}
+      S3_BUCKET:      ${{ vars.S3_BUCKET_NAME_DEV }}
+      CF_DIST_ID:     ${{ vars.CLOUDFRONT_DISTRIBUTION_ID_DEV }}
+
+  deploy-stg.yml:
+    on:
+      push:
+        branches: [release-stg]
+    env:
+      AWS_ACCOUNT:    "<stg-account-id>"
+      ENVIRONMENT:    "stg"
+      AWS_REGION:     "us-east-1"
+      ROLE_ARN:       ${{ secrets.AWS_ROLE_ARN_STG }}
+      S3_BUCKET:      ${{ vars.S3_BUCKET_NAME_STG }}
+      CF_DIST_ID:     ${{ vars.CLOUDFRONT_DISTRIBUTION_ID_STG }}
+
+TERRAFORM VARIABLES THAT MUST BE PARAMETERIZED (currently not):
+  Variable              | Why
+  ----------------------|-----------------------------------------------------
+  aws_account           | Cross-account validation in providers.tf
+  github_branch         | OIDC trust condition (ref restriction per env)
+  github_repo           | OIDC trust condition (repo restriction)
+  State backend key     | environments/{env}/backend.hcl, not hardcoded
+  IAM role name         | {project}-{env}-github-deploy, not "github-actions-deploy"
+  All resource names    | ${var.project_name}-${var.environment}-{resource}
+
+GITHUB SECRETS AND VARIABLES NEEDED:
+  Secrets (per env):
+    AWS_ROLE_ARN_DEV     — IAM role ARN in DEV account
+    AWS_ROLE_ARN_STG     — IAM role ARN in STG account
+
+  Variables (per env):
+    S3_BUCKET_NAME_DEV
+    S3_BUCKET_NAME_STG
+    CLOUDFRONT_DISTRIBUTION_ID_DEV
+    CLOUDFRONT_DISTRIBUTION_ID_STG
+
+================================================================================
+19. COMMIT TAGGING STRATEGY
+================================================================================
+
+FORMAT: release-{env}-SHA-{git_sha_short_7_chars}
+  Examples:
+    release-dev-SHA-a1b2c3d   ← DEV deploy of commit a1b2c3d
+    release-stg-SHA-e4f5g6h   ← STG deploy of commit e4f5g6h
+
+IMPLEMENTATION IN GITHUB ACTIONS (post-verify step):
+  - name: Tag release
+    run: |
+      TAG="release-${{ env.ENVIRONMENT }}-SHA-${GITHUB_SHA::7}"
+      git config user.name  "github-actions[bot]"
+      git config user.email "github-actions[bot]@users.noreply.github.com"
+      git tag -a "$TAG" -m "Deploy to ${{ env.ENVIRONMENT }} from ${GITHUB_SHA}"
+      git push origin "$TAG"
+
+CROSS-REPOSITORY TRACEABILITY:
+  When UI and infra are separate repos, both produce matching tags:
+    agenticai-ui    commit release-dev-SHA-a1b2c3d  → UI files deployed to DEV
+    agenticai-infra commit release-dev-SHA-e4f5g6h  → Terraform applied to DEV
+
+  The release-dev branch in each repo always reflects what is live in DEV.
+  Tags are permanent, searchable, and link back to exact code + infra state.
+
+INFRASTRUCTURE VERSIONING:
+  Terraform state already versions infrastructure state in S3.
+  Each git tag on the infra repo maps to an exact terraform.tfstate snapshot.
+  Combined: code tag + infra tag + S3 state version = full audit trail.
+
+================================================================================
+20. MULTI-STAGE PIPELINE + DEVSECOPS
+================================================================================
+
+PROPOSED PIPELINE ARCHITECTURE (per environment workflow):
+
+  Job 1: validate
+    Runs on: every push
+    Steps:
+      - terraform fmt -check         ← formatting gate
+      - terraform validate           ← syntax gate
+      - checkov --dir terraform/     ← IaC security policy gate
+      - gitleaks detect              ← secret scanning gate
+    On failure: block all subsequent jobs
+
+  Job 2: security-scan (parallel with validate)
+    Steps:
+      - tfsec terraform/             ← Terraform security linting
+      - HTML link checker (optional) ← UI quality gate
+
+  Job 3: plan (needs: validate)
+    Steps:
+      - terraform init -backend-config
+      - terraform plan -out=tfplan.binary -var-file=environments/{env}/terraform.tfvars
+      - Upload tfplan.binary as GitHub Actions artifact
+      - Post plan summary as PR comment (using tfcmt or custom script)
+
+  Job 4: approve (needs: plan, security-scan)
+    DEV:  auto-approved (no gate)
+    STG:  GitHub Environment "stg" with required reviewer rule
+          Reviewer must approve before Job 5 runs
+
+  Job 5: deploy (needs: approve)
+    Steps:
+      - Download tfplan.binary artifact  ← apply exactly what was reviewed
+      - terraform apply tfplan.binary    ← no fresh plan, no drift between review/apply
+      - aws s3 sync to S3 bucket         ← site content deploy
+      - aws cloudfront create-invalidation ← cache flush
+
+  Job 6: verify (needs: deploy)
+    Steps:
+      - HTTP smoke test: curl -f https://{cloudfront_url} → expect 200
+      - terraform output validation (check outputs exist)
+      - aws cloudfront get-distribution → verify status = Deployed
+
+  Job 7: tag-and-notify (needs: verify)
+    Steps:
+      - git tag release-{env}-SHA-{sha} and push
+      - Notify Slack/email: deploy successful, URL, tag, deployer identity
+    On failure of any previous job:
+      - Notify Slack/email: deploy FAILED, job name, error summary
+
+NOTES ON CURRENT SINGLE-STEP S3 SYNC:
+  Current deploy.yml does aws s3 sync in one step with no validation before
+  or verification after. This means:
+    - A broken HTML file will deploy silently
+    - No confirmation the site is actually responding after deploy
+    - No record of what changed (no --dryrun first)
+  Multi-stage fixes all three.
+
+================================================================================
+21. SEPARATE CODE & INFRASTRUCTURE REPOSITORIES
+================================================================================
+
+RECOMMENDED SPLIT FOR MINIMUM BLAST RADIUS:
+
+  Repo 1: agenticai-ui (Code Repository)
+    Responsibility: All site content — HTML, CSS, images, static assets
+    Owns: S3 sync and CloudFront invalidation workflows
+    Does NOT own: Terraform, IAM, infrastructure provisioning
+    Who merges: Frontend/UI engineers, reviewed by content owners
+    Branch strategy:
+      main         → source of truth
+      release-dev  → triggers deploy to DEV S3 bucket
+      release-stg  → triggers deploy to STG S3 bucket
+    OIDC Role permissions: s3:Put/Get/Delete/List, cloudfront:CreateInvalidation
+
+  Repo 2: agenticai-infra (Infrastructure Repository)
+    Responsibility: All AWS infrastructure via Terraform, all AI automation
+    Owns: terraform/, .claude/, .github/workflows/infra-*.yml
+    Does NOT own: site content files
+    Who merges: Platform/DevOps engineers, reviewed by security team
+    Branch strategy:
+      main         → source of truth
+      release-dev  → triggers infra-dev.yml (plan + apply to DEV account)
+      release-stg  → triggers infra-stg.yml (plan + apply to STG account)
+    OIDC Role permissions: Full Terraform permissions (S3, CF, IAM, DynamoDB)
+
+BLAST RADIUS BENEFITS:
+  - A bad HTML commit cannot affect infrastructure state
+  - A Terraform change cannot accidentally overwrite site content
+  - OIDC roles are least-privilege per repo — UI repo cannot touch state bucket
+  - Independent deploy cadences: site can deploy 10x per day, infra 1x per week
+  - Separate code review processes and approval gates per domain
+  - Separate access controls: UI repo is less sensitive than infra repo
+
+COORDINATION FOR FIRST-TIME SETUP:
+  1. Provision infrastructure first using agenticai-infra repo
+  2. agenticai-infra terraform output → bucket name + distribution ID
+  3. Set those values as GitHub vars in agenticai-ui repo
+  4. UI repo's workflows now have the targets they need
+
+================================================================================
+22. MISSING AI-SIDE CAPABILITIES
+================================================================================
+
+  Missing Item              | Type    | Purpose
+  --------------------------|---------|------------------------------------------
+  release-manager           | Agent   | Git tagging, branch promotion, changelog
+  env-provisioner           | Agent   | Bootstrap new env: state bucket, DynamoDB,
+                            |         | OIDC provider, IAM role, environments/ dir
+  pipeline-validator        | Agent   | Validate GitHub Actions YAML, check secret
+                            |         | names exist, verify action version pinning
+  /rollback [env]           | Skill   | Restore prior S3 version, re-invalidate CF
+  /promote dev stg          | Skill   | Promote release-dev artifacts → release-stg
+  /tag-release              | Skill   | Create release-{env}-SHA-{sha} and push
+  /validate-env [env]       | Skill   | Pre-flight: credentials, bucket, distribution
+  /cost-report [env]        | Skill   | Pull real Cost Explorer data for project tags
+  /add-env [name]           | Skill   | Scaffold new environment dir + backend config
+  tf-destroy SKILL.md       | Skill   | FILE MISSING — referenced in CLAUDE.md only
+  scaffold-cicd SKILL.md    | Skill   | FILE MISSING — referenced in CLAUDE.md only
+  project-scope SKILL.md    | Skill   | FILE MISSING — auto-loaded background knowledge
+  PostToolUse S3 sync hook  | Hook    | Log every aws s3 sync to deploy.log
+  Path-portable hooks       | Hook    | Replace all hardcoded paths with dynamic detect
+  Notification hook         | Hook    | Webhook/Slack on deployment complete or failed
+  Agent memory: env-context | Memory  | Per-environment patterns discovered over time
+  Agent memory: cost trends | Memory  | Track cost changes across audit sessions
+
+AGENT COVERAGE MATRIX (current vs. recommended):
+
+  Capability                  | Current Agent    | Status
+  ----------------------------|------------------|--------------------------------
+  Write Terraform code        | tf-writer        | EXISTS — add Bash tool
+  Audit security              | security-auditor | EXISTS — add JSON output format
+  Optimize costs              | cost-optimizer   | EXISTS — fix price_class gap
+  Detect drift                | drift-detector   | EXISTS — add -no-color flag
+  Manage releases/tags        | (none)           | MISSING — create release-manager
+  Provision new environments  | (none)           | MISSING — create env-provisioner
+  Validate CI/CD pipelines    | (none)           | MISSING — create pipeline-validator
+  Send notifications          | (none)           | MISSING — add notify-agent or hook
+
+================================================================================
+PRIORITY SUMMARY TABLE
+================================================================================
+
+  Priority | Category          | Action
+  ---------|-------------------|---------------------------------------------------
+  P0       | Hooks             | Remove all hardcoded paths; use git rev-parse.
+           |                   | Add jq guard. Add set -euo pipefail.
+  P0       | Skills            | Create missing SKILL.md files:
+           |                   | tf-destroy, scaffold-cicd, project-scope
+  P0       | Terraform         | Commit .terraform.lock.hcl (remove from .gitignore)
+           |                   | Set price_class = "PriceClass_100" explicitly
+  P1       | Multi-environment | Add environments/dev/ and environments/stg/
+           |                   | Variabilize: github_repo, github_branch,
+           |                   | aws_account, IAM role names, all resource names
+  P1       | Pipeline          | Redesign to multi-stage:
+           |                   | validate → plan → approve → deploy → verify → tag
+           |                   | Add checkov, tfsec, gitleaks, smoke test, tagging
+  P1       | Terraform         | Add locals.tf with common_tags
+           |                   | Add validation{} blocks to all variables
+           |                   | Move backend-infrastructure.tf to modules/
+  P2       | Agents            | Create: release-manager, env-provisioner,
+           |                   |         pipeline-validator
+           |                   | Fix: tf-writer (add Bash), cost-optimizer (price_class)
+  P2       | Skills            | Add: /rollback, /promote, /tag-release,
+           |                   |      /validate-env, /cost-report, /add-env
+  P2       | README            | Rewrite with team sections + Mermaid diagram
+           |                   | Remove all hardcoded live resource values
+  P3       | Observability     | Add CloudWatch alarms, SNS, budgets via Terraform
+           |                   | Add CloudFront access logging
+           |                   | Add aws_cloudfront_response_headers_policy (sec hdrs)
+  P3       | Repo split        | Separate agenticai-ui and agenticai-infra repos
+           |                   | when team size or blast radius requires it
+
+================================================================================
+END OF MODERNISATION PLAN
+================================================================================

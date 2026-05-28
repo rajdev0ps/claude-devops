@@ -46,29 +46,26 @@ data "aws_iam_policy_document" "github_actions_trust" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # Restrict to specific repository and main branch
+    # Restrict to specific repository and branch — set via variables
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:rajdev0ps/Ultimate-Agentic-DevOps-with-Claude-Code:ref:refs/heads/main"]
+      values   = ["repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"]
     }
   }
 }
 
 # IAM Role for GitHub Actions
 resource "aws_iam_role" "github_actions_deploy" {
-  name               = "github-actions-deploy"
+  name               = "${var.project_name}-${var.environment}-github-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_actions_trust.json
 
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-  }
+  tags = local.common_tags
 }
 
 # Attach policy to role
 resource "aws_iam_role_policy" "github_actions_deploy" {
-  name   = "github-actions-deploy-policy"
+  name   = "${var.project_name}-${var.environment}-github-deploy-policy"
   role   = aws_iam_role.github_actions_deploy.id
   policy = data.aws_iam_policy_document.github_actions_policy.json
 }
