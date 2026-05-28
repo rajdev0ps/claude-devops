@@ -1,0 +1,233 @@
+name: Deploy — DEV
+
+on:
+  push:
+    branches:
+      - release-dev
+
+permissions:
+  id-token: write  # OIDC token
+  contents: write  # git tag push
+
+env:
+  ENVIRONMENT: dev
+  AWS_REGION:  us-east-1
+  TF_VERSION:  1.14.4
+  TF_DIR:      terraform
+
+jobs:
+  # ── Job 1: Validate & Security Scan ─────────────────────────────────────────
+  validate:
+    name: Validate & Security Scan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform Validate (no backend)
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Checkov — IaC Security Scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          quiet: true
+          soft_fail: true
+
+      - name: tfsec — Terraform Security Lint
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: terraform
+          soft_fail: true
+
+      - name: Gitleaks — Secret Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Job 2: Terraform Plan ────────────────────────────────────────────────────
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-22.04
+    needs: validate
+    outputs:
+      distribution_id: ${{ steps.tf-outputs.outputs.distribution_id }}
+      domain:          ${{ steps.tf-outputs.outputs.domain }}
+      bucket:          ${{ steps.tf-outputs.outputs.bucket }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=petclinic-poc/dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="dynamodb_table=terraform-locks"
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file=../environments/dev/ci.tfvars \
+            -out=tfplan.binary \
+            -no-color 2>&1 | tee plan-output.txt
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Read Terraform Outputs (current state)
+        id: tf-outputs
+        run: |
+          echo "distribution_id=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "domain=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo '')"              >> $GITHUB_OUTPUT
+          echo "bucket=$(terraform output -raw s3_bucket_name 2>/dev/null || echo '')"                     >> $GITHUB_OUTPUT
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name:           tfplan-dev-${{ github.sha }}
+          path:           terraform/tfplan.binary
+          retention-days: 1
+
+  # ── Job 3: Deploy ────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to DEV
+    runs-on: ubuntu-22.04
+    needs: plan
+    environment: dev
+    outputs:
+      distribution_id: ${{ steps.tf-apply-outputs.outputs.distribution_id }}
+      domain:          ${{ steps.tf-apply-outputs.outputs.domain }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev-${{ github.sha }}
+          path: terraform/
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=petclinic-poc/dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="dynamodb_table=terraform-locks"
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform Apply
+        run: terraform apply tfplan.binary
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Get Post-Apply Outputs
+        id: tf-apply-outputs
+        run: |
+          echo "bucket=$(terraform output -raw s3_bucket_name)"                      >> $GITHUB_OUTPUT
+          echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> $GITHUB_OUTPUT
+          echo "domain=$(terraform output -raw cloudfront_domain_name)"              >> $GITHUB_OUTPUT
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Sync Site to S3
+        run: |
+          aws s3 sync . s3://${{ steps.tf-apply-outputs.outputs.bucket }} \
+            --delete \
+            --exclude ".git/*" \
+            --exclude ".github/*" \
+            --exclude ".claude/*" \
+            --exclude "terraform/*" \
+            --exclude "environments/*" \
+            --exclude ".mcp.json" \
+            --exclude "*.md" \
+            --exclude "*.txt" \
+            --exclude ".tool-versions"
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.tf-apply-outputs.outputs.distribution_id }} \
+            --paths "/*"
+
+  # ── Job 4: Verify ────────────────────────────────────────────────────────────
+  verify:
+    name: Verify Deployment
+    runs-on: ubuntu-22.04
+    needs: deploy
+    steps:
+      - name: Wait for CloudFront propagation
+        run: sleep 30
+
+      - name: HTTP Smoke Test
+        run: |
+          DOMAIN="${{ needs.deploy.outputs.domain }}"
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${DOMAIN}")
+          echo "CloudFront domain : https://${DOMAIN}"
+          echo "HTTP status       : ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "Smoke test FAILED — expected 200, got ${HTTP_STATUS}"
+            exit 1
+          fi
+          echo "Smoke test PASSED"
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Confirm CloudFront Distribution Status
+        run: |
+          STATUS=$(aws cloudfront get-distribution \
+            --id "${{ needs.deploy.outputs.distribution_id }}" \
+            --query "Distribution.Status" \
+            --output text)
+          echo "CloudFront status: ${STATUS}"
+
+  # ── Job 5: Tag Release ───────────────────────────────────────────────────────
+  tag:
+    name: Tag Release
+    runs-on: ubuntu-22.04
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release Tag
+        run: |
+          TAG="release-dev-SHA-${GITHUB_SHA::7}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "DEV deploy | sha=${GITHUB_SHA} | actor=${{ github.actor }}"
+          git push origin "$TAG"
+          echo "Tagged: $TAG"
