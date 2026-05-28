@@ -77,3 +77,18 @@ variable "cloudfront_price_class" {
     error_message = "cloudfront_price_class must be one of: PriceClass_100, PriceClass_200, PriceClass_All"
   }
 }
+
+variable "alert_email" {
+  description = "Email address for CloudWatch alarm and budget notifications"
+  type        = string
+  validation {
+    condition     = can(regex("^[^@]+@[^@]+\\.[^@]+$", var.alert_email))
+    error_message = "alert_email must be a valid email address"
+  }
+}
+
+variable "monthly_budget_limit" {
+  description = "Monthly AWS spend limit in USD — alerts at 80% actual and 100% forecasted"
+  type        = string
+  default     = "10"
+}

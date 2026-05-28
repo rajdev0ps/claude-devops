@@ -20,3 +20,6 @@ github_branch = "release-dev"              # branch scoped in OIDC trust (e.g. r
 
 owner_team  = "platform-team" # your team name — goes into resource tags
 cost_center = "CC-001"        # billing cost center code — goes into resource tags
+
+alert_email          = "your-email@example.com" # receives CloudWatch alarm + budget notifications
+monthly_budget_limit = "10"                      # USD — alerts at 80% actual and 100% forecasted

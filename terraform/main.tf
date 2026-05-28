@@ -15,6 +15,22 @@ resource "aws_s3_bucket_public_access_block" "site_bucket_pab" {
   restrict_public_buckets = true
 }
 
+# Expire non-current object versions after 90 days to reduce storage cost
+resource "aws_s3_bucket_lifecycle_configuration" "site_bucket" {
+  bucket = aws_s3_bucket.site_bucket.id
+
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+
+    filter {} # applies to all objects in the bucket
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+  }
+}
+
 # Enable encryption on the site bucket
 resource "aws_s3_bucket_server_side_encryption_configuration" "site_bucket_sse" {
   bucket = aws_s3_bucket.site_bucket.id
