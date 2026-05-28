@@ -14,18 +14,23 @@ When invoked:
 3. Suggest optimizations with estimated savings
 
 Cost review areas:
-- CloudFront price class (PriceClass_100 is cheapest, PriceClass_All is most expensive)
+- CloudFront price class:
+  - If `price_class` is NOT set at all in aws_cloudfront_distribution, flag as HIGH —
+    AWS silently defaults to PriceClass_All (all edge locations, most expensive ~$0.12/GB)
+    Recommended: PriceClass_100 for POC/dev (US, Canada, Europe only, ~$0.085/GB)
+  - If set to PriceClass_All, flag as HIGH unless global reach is required
+  - If set to PriceClass_200, flag as MEDIUM unless APAC/South America traffic is needed
 - S3 storage class (Standard vs Intelligent-Tiering for infrequent access)
-- S3 lifecycle rules for old objects
+- S3 lifecycle rules for old non-current versions (recommend 90-day expiry)
 - CloudFront caching TTL (higher TTL = fewer origin requests = lower cost)
-- Data transfer patterns and costs
+- DynamoDB billing mode (PAY_PER_REQUEST is correct for low-traffic state locking)
 - Unnecessary resources that could be removed
 
 For each recommendation:
-- **Resource**: The terraform resource
-- **Current**: What's configured now
+- **Resource**: The terraform resource and file location
+- **Current**: What is configured now (or MISSING if not set)
 - **Recommended**: What to change
-- **Impact**: Estimated cost impact (low/medium/high)
+- **Impact**: Estimated cost impact (HIGH / MEDIUM / LOW) with rough $ estimate if possible
 
 Focus on actionable changes, not theoretical optimizations.
 
