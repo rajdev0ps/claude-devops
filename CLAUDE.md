@@ -40,29 +40,47 @@ AWS credentials and region are configured in `.claude/settings.local.json` (giti
 
 ## Custom Agents (`.claude/agents/`)
 
-This project has 4 specialized subagents. Use them by name when delegating tasks:
-- **tf-writer** — generates Terraform code (has Write access + project memory)
+This project has 7 specialized subagents. Use them by name when delegating tasks:
+- **tf-writer** — generates Terraform code (Read/Write/Bash, runs fmt+validate after writing)
 - **security-auditor** — audits TF for security issues (Read-only, Sonnet)
-- **cost-optimizer** — reviews infra cost (Read-only, Haiku)
-- **drift-detector** — detects state drift (Bash, Haiku)
+- **cost-optimizer** — reviews infra cost including absent price_class (Read-only, Haiku)
+- **drift-detector** — detects state drift via terraform plan (Bash, Haiku)
+- **release-manager** — git tagging + branch promotion release-dev→release-stg (Bash, Sonnet)
+- **env-provisioner** — bootstraps new environment directories and checklists (Write, Sonnet)
+- **pipeline-validator** — audits .github/workflows/*.yml for DevSecOps compliance (Read, Haiku)
 
 ## Skills (`.claude/skills/`)
 
 All infrastructure and deployment tasks are handled via skills. Do not write Terraform or CI/CD code manually — use the appropriate skill. Action skills have `disable-model-invocation: true` (manual only). The `project-scope` skill has `user-invocable: false` (auto-loaded by Claude as background knowledge).
 
 ```
+# Infrastructure
 /scaffold-terraform [region] [name]  → Generate all Terraform files (uses tf-writer agent)
-/scaffold-cicd [aws-account-id]      → Generate GitHub Actions + OIDC IAM role
+/scaffold-cicd [account-id] [env]    → Generate GitHub Actions workflow + OIDC IAM role
 /tf-plan                             → Run terraform plan + risk analysis
-/tf-apply                            → Run terraform apply + verify
-/deploy                              → Sync S3 + invalidate CloudFront
+/tf-apply                            → Run terraform apply + verify outputs
 /infra-status                        → Health dashboard of all resources
 /infra-audit                         → Parallel security + cost + drift audit (forked context)
+
+# Deployment
+/deploy                              → Sync S3 + invalidate CloudFront (current devtest env)
+/validate-env [dev|stg]             → Pre-flight checks before deploying to an environment
+/rollback [dev|stg]                  → Restore previous S3 version + invalidate CloudFront
+
+# Release management
+/promote [dev]                       → Merge release-dev → release-stg (with confirmation)
+/tag-release [dev|stg] [sha]        → Create annotated release-{env}-SHA-{sha} git tag
+
+# Environment management
+/add-env [name]                      → Scaffold new environment directory + backend template
 /setup-gh-actions [create|validate]  → Create or validate CI workflow
-/tf-destroy                          → Safe destroy with confirmation
-project-scope                        → Background knowledge: AWS service constraints (auto-loaded)
+
+# AI / Claude Code
+project-scope                        → Background knowledge: AWS constraints (auto-loaded)
 /commit                              → Auto-generate commit message (built-in)
 /compact                             → Compress long conversation context (built-in)
+
+# NOTE: terraform destroy is ALWAYS blocked — run manually via CLI only
 ```
 
 ## Commands
