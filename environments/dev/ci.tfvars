@@ -10,7 +10,7 @@ domain_name                         = ""
 existing_cloudfront_distribution_id = ""
 cloudfront_price_class              = "PriceClass_100"
 
-github_repo   = "rajdev0ps/agenticai-infra"
+github_repo   = "rajdev0ps/claude-devops"
 github_branch = "release-dev"
 
 owner_team           = "platform-team"
