@@ -56,6 +56,16 @@ variable "github_branch" {
   }
 }
 
+variable "github_ui_repo" {
+  description = "GitHub repository for the UI code (agenticai-ui) — used in UI OIDC trust condition"
+  type        = string
+  default     = "rajdev0ps/agenticai-ui"
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", var.github_ui_repo))
+    error_message = "github_ui_repo must be in owner/name format e.g. rajdev0ps/agenticai-ui"
+  }
+}
+
 variable "owner_team" {
   description = "Team responsible for this environment — used in resource tags"
   type        = string
