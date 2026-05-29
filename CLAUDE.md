@@ -4,16 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Static HTML/CSS portfolio website deployed to AWS using S3 + CloudFront, provisioned with Terraform, and automated via GitHub Actions.
+Infrastructure-as-Code and AI automation for the Agentic AI Platform.
+Manages AWS resources (S3, CloudFront, IAM, DynamoDB) via Terraform and
+deploys via multi-stage GitHub Actions pipelines.
+
+**Site content** (HTML/CSS) lives in a separate repo: `rajdev0ps/agenticai-ui`
+**Infrastructure** (Terraform + Claude Code) lives here: `rajdev0ps/claude-devops`
 
 ## Architecture
 
 ### Application (Static Site)
-- **index.html** — Agentic AI Platform landing page (Navbar, Hero, Feature cards, Stats)
-- **style.css** — All styling (~435 lines), mobile-first responsive (breakpoints: 1200px, 768px)
-- **privacy.html / terms.html** — Standalone pages with inline styles
-- **images/** — Static assets directory (currently empty; index.html references image.png at root)
-- Pure HTML5 + CSS3, no JavaScript, no build step
+- Site content (`index.html`, `style.css`) lives in **`rajdev0ps/agenticai-ui`**
+- Deployed to S3 + CloudFront via the UI repo's own pipelines
+- UI pipelines use a separate least-privilege IAM role (`*-ui-deploy`)
 
 
 ### Infrastructure (`terraform/`)

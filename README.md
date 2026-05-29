@@ -1,8 +1,11 @@
-# Agentic AI Platform — DevOps Infrastructure
+# Agentic AI Platform — Infrastructure (claude-devops)
 
-Static HTML/CSS website deployed to AWS S3 + CloudFront via Terraform IaC and
-multi-stage GitHub Actions pipelines. Automated with Claude Code AI agents,
-custom skills, and safety hooks.
+Terraform IaC and Claude Code AI automation for the Agentic AI Platform.
+Manages all AWS resources and CI/CD pipelines across DEV and STG environments.
+
+> **Two-repo architecture:**
+> - **This repo** (`claude-devops`) — Terraform, pipelines, Claude Code agents/skills
+> - **UI repo** (`agenticai-ui`) — HTML/CSS site content, lightweight deploy pipelines
 
 ---
 
